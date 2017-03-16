@@ -52,12 +52,13 @@ public:
   // device ctor
   generic(layer* lower, const char* name = "dev_generic")
     : device(lower, name)
+    , is_open_(false)
+    , is_connected_(false)
+    , tx_status_(disconnected)
+    , callback_(nullptr)
+    , callback_arg_(nullptr)
   {
-    is_open_      = false;
-    is_connected_ = false;
-    tx_status_    = disconnected;
-    callback_     = nullptr;
-    callback_arg_ = nullptr;
+    tx_ev_.set();   // set event initially
   }
 
 
@@ -211,12 +212,18 @@ public:
       return false;
     }
 
+    if (!tx_ev_.get()) {
+      // sending is still in progress
+      DECOM_LOG_ERROR("Transmission in progress, sending not possible");
+      return false;
+    }
+
+    tx_ev_.reset();                         // clear indication
     if (!blocking) {
       // return without waiting for tx done
       return device::send(data, id, more);  // send data to lower layer
     }
     else {
-      tx_ev_.reset();                       // clear indication
       if (device::send(data, id, more)) {   // send data to lower layer
         tx_ev_.wait();                      // wait for notification
         // return when tx indication received
