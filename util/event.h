@@ -80,6 +80,15 @@ public:
 
 
   /**
+   * Return the event status
+   */
+  inline bool get() const
+  {
+    return state_;
+  }
+
+
+  /**
    * Wait forever for the event to get signaled.
    * If the event was previously set, wait() returns immediately.
    * Does NOT reset the event.
