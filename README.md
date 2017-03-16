@@ -70,28 +70,40 @@ xmodem between a device and a communication port.
 The minimalistic stack is a device bound to a communication class without any protocol:
 
 ```c++
+// include the necessary heades, include path must include the 'decom' folder
+#include "prot/prot_debug.h"
+#include "com/com_serial.h"
+#include "dev/dev_generic.h"
+
 // create a mini stack
-decom::com::serial  ser(1);      // layer2 - create serial COM1 with default params
-decom::dev::generic dev(&ser);   // layer7 - create generic device and bind it directly to serial interface
+decom::com::serial com(9600U);   // use 9600 baud
+decom::prot::debug dbg(&com);    // debug layer
+decom::dev::generic dev(&dbg);
+
 // then use the stack
-dev.open(...);           // open the device (and implicit open the rest of the stack)
-dev.write(...);          // write something to device
-dev.read(...);           // read something from device
-dev.close();             // close device (and implicit close the rest of the stack)
+dev.open("COM1");       // open the COM1
+dev.write(...);         // write something to device
+dev.read(...);          // read something from device
+dev.close();            // close device (and implicit close the rest of the stack)
 ```
 
 Example for a more complex stack creation with 3 protocols:
 
 ```c++
 // create the stack
-decom::com::serial ser(1, 115200);        // layer2 - open COM1 with 115 kBaud and default params
+decom::com::serial ser(115200);           // layer2 - 115 kBaud and default params
 decom::prot::test1 prot1(&ser);           // layer3 - create layer 3 routing protocol
 decom::prot::test2 prot2(&prot1, p1, p2); // layer4 - create layer 4 transport protocol with additional params P1 and P2
 decom::prot::session sess(&prot2);        // layer5 - create layer 5 session protocol
 decom::dev::generic dev(&sess);           // layer7 - create generic device and bind to session protcol
+
 // use the stack
-dev.open(...);           // open the device (and implicit open the rest of the stack)
+dev.open("COM2");        // open COM2 (and implicit open the rest of the stack)
 dev.write(...);          // write something to device
 dev.read(...);           // read something from device
 dev.close();             // close device (and implicit close the rest of the stack)
 ```
+
+
+## License
+decom is written under the MIT licence.
