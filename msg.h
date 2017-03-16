@@ -884,7 +884,7 @@ public:
   /**
    * msg pool access
    */
-  inline msg_pool& get_msg_pool()
+  static inline msg_pool& get_msg_pool()
   {
     static msg_pool _msg_pool;
     return _msg_pool;
