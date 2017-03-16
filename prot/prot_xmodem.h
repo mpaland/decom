@@ -46,7 +46,7 @@
 #ifndef _DECOM_PROT_XMODEM_H_
 #define _DECOM_PROT_XMODEM_H_
 
-#include "decom_prot.h"
+#include "prot.h"
 
 /////////////////////////////////////////////////////////////////////
 
