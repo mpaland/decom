@@ -30,7 +30,7 @@
 // Example usage:
 // decom::com::usbhid usb;
 // decom::dev::generic gen(&usb);
-// std::vector<decom::com::usbhid::hid_device_info> dev_info = usb.enumerate();  // enum all devices
+// std::vector<decom::com::usbhid::hid_device_info_type> dev_info = usb.enumerate();  // enum all devices
 // gen.open(dev_info[0].path, 0);  // open first device (for demo)
 // gen.write(std::string("12345678901234567890"));
 // gen.close();
@@ -46,11 +46,17 @@
 #include <process.h>
 #include <setupapi.h>   // YOU HAVE TO LINK 'setupapi.lib'. Mostly as first library.
 #include <winioctl.h>
-#include <assert.h>
 #include <atlconv.h>    // conversion macros
 #include <vector>
 
 #include "com.h"
+
+/////////////////////////////////////////////////////////////////////
+
+// defines the receive buffer size, but the value is likely arbitrary
+#ifndef DECOM_COM_USBHID_RX_BUFSIZE
+#define DECOM_COM_USBHID_RX_BUFSIZE   32768U
+#endif
 
 /////////////////////////////////////////////////////////////////////
 
@@ -116,6 +122,12 @@ public:
    */
   usbhid(const char* name = "com_usbhid")
     : communicator(name)   // it's VERY IMPORTANT to call the base class ctor HERE!!!
+    , thread_handle_(INVALID_HANDLE_VALUE)
+    , device_handle_(INVALID_HANDLE_VALUE)
+    , tx_busy_(false)
+    , rx_busy_(false)
+    , tx_offset_(0U)
+
   {
     lib_handle_ = ::LoadLibraryA("hid.dll");
     if (lib_handle_) {
@@ -135,18 +147,10 @@ public:
 #undef RESOLVE
     }
 
-    events_[ev_terminate] = ::CreateEvent(NULL, TRUE, FALSE, NULL);
-    events_[ev_transmit] = ::CreateEvent(NULL, FALSE, FALSE, NULL);    // auto reset event
-    events_[ev_receive] = ::CreateEvent(NULL, FALSE, FALSE, NULL);    // auto reset event
-
-    thread_handle_ = INVALID_HANDLE_VALUE;
-    device_handle_ = INVALID_HANDLE_VALUE;
-
-    memset(&tx_overlapped_, 0, sizeof(tx_overlapped_));
-    tx_overlapped_.hEvent = events_[ev_transmit];
-    tx_busy_ = false;
-    tx_buf_ = nullptr;
-    tx_offset_ = 0U;
+    // create events
+    events_[ev_terminate] = ::CreateEvent(NULL, TRUE, FALSE, NULL);    // manual reset event
+    events_[ev_transmit]  = ::CreateEvent(NULL, TRUE, FALSE, NULL);    // manual reset event
+    events_[ev_receive]   = ::CreateEvent(NULL, TRUE, FALSE, NULL);    // manual reset event
   }
 
 
@@ -165,91 +169,6 @@ public:
 
     if (lib_handle_) {
       (void)::FreeLibrary(lib_handle_);
-    }
-  }
-
-
-  static void worker(void* arg)
-  {
-    usbhid* u = static_cast<usbhid*>(arg);
-
-    // defines the receive buffer size
-#define RXBUFSIZE 16384
-
-    BYTE buf[RXBUFSIZE];              // receive buffer
-    DWORD bytes_read, bytes_written;
-
-    // validate port - MUST be open and active
-    DECOM_LOG_VERIFY(u->is_open());
-
-    OVERLAPPED overlapped;
-    memset(&overlapped, 0, sizeof(overlapped));
-    overlapped.hEvent = u->events_[ev_receive];
-
-    for (;;)
-    {
-      // issue read operation
-      if (::ReadFile(u->device_handle_, buf, static_cast<DWORD>(u->device_info_.input_report_length), &bytes_read, &overlapped)) {
-        // data is available, dwBytesRead is valid
-        if (bytes_read) {
-          decom::msg data(buf + 1U, buf + bytes_read);  // first byte is report id
-          u->communicator::receive(data);
-        }
-      }
-      else {
-        if (::GetLastError() != ERROR_IO_PENDING) {
-          // com error, port closed etc.
-          DECOM_LOG_ASSERT(false);
-        }
-
-        switch (::WaitForMultipleObjects(usbhid::ev_max, reinterpret_cast<::HANDLE*>(u->events_), FALSE, INFINITE))
-        {
-        case WAIT_OBJECT_0:
-          // kill event - terminate worker thread
-          return;
-
-        case WAIT_OBJECT_0 + usbhid::ev_receive:
-          // rx event
-          if (::GetOverlappedResult(u->device_handle_, &overlapped, &bytes_read, TRUE) && bytes_read) {
-            // bytes received, pass data to upper layer
-            msg data(buf + 1U, buf + bytes_read);         // first byte is report id
-            u->communicator::receive(data, buf[0]);       // use report id as channel
-          }
-          break;
-
-        case WAIT_OBJECT_0 + usbhid::ev_transmit:
-          // tx event
-          if (::GetOverlappedResult(u->device_handle_, &u->tx_overlapped_, &bytes_written, TRUE) && bytes_written) {
-            // okay - byte written, any more data segments to send
-            if (u->tx_offset_ < u->tx_msg_.size()) {
-              // send next segment
-              if (!u->send_segment()) {
-                // serious error - inform upper layer
-                u->communicator::indication(tx_error, u->tx_eid_);
-              }
-            }
-            else {
-              // data complete, inform upper layer
-              u->communicator::indication(tx_done, u->tx_eid_);
-            }
-          }
-          else {
-            // error - bytes not written
-            // discard any outstanding send data
-            u->communicator::indication(tx_error, u->tx_eid_);
-          }
-          u->tx_busy_ = false;
-          break;
-
-        case WAIT_TIMEOUT:
-          // should never happen
-          DECOM_LOG_ASSERT(false);
-          break;
-
-        default:
-          break;
-        }
-      }
     }
   }
 
@@ -291,23 +210,20 @@ public:
     device_info_ = get_device_info(device_handle_);
     device_info_.path = address;
 
-    // init tx buffer
-    tx_buf_ = new std::uint8_t[device_info_.output_report_length + 1U];
-
     ///////////////////// create receive thread ////////////////////////////
 
     thread_handle_ = reinterpret_cast<HANDLE>(::_beginthreadex(
       NULL,
       0U,
-      reinterpret_cast<unsigned(__stdcall *)(void*)>(&usbhid::worker),
+      reinterpret_cast<unsigned(__stdcall *)(void*)>(&worker_thread),
       reinterpret_cast<void*>(this),
       CREATE_SUSPENDED,
       NULL
     ));
-
     if (!thread_handle_)
     {
       // error to create thread - close all
+      DECOM_LOG_ERROR("Error creating thread");
       close();
       return false;
     }
@@ -335,7 +251,7 @@ public:
     if (thread_handle_ != INVALID_HANDLE_VALUE)
     {
       (void)::SetEvent(events_[ev_terminate]);
-      (void)::WaitForSingleObject(thread_handle_, INFINITE);
+      (void)::WaitForSingleObject(thread_handle_, 3000U);   // wait 3 sec for thread termination
       (void)::CloseHandle(thread_handle_);
       thread_handle_ = INVALID_HANDLE_VALUE;
     }
@@ -344,12 +260,6 @@ public:
     if (device_handle_ != INVALID_HANDLE_VALUE) {
       (void)::CloseHandle(device_handle_);
       device_handle_ = INVALID_HANDLE_VALUE;
-    }
-
-    // close buffer
-    if (tx_buf_) {
-    delete[] tx_buf_;
-      tx_buf_ = nullptr;
     }
 
     // port closed indication
@@ -370,27 +280,24 @@ public:
 
     // validate device
     if (!is_open()) {
+      DECOM_LOG_ERROR("Sending failed: device is not open");
       return false;
     }
 
     // if an overlapped transfer is in progress, no new data can be accepted
     if (tx_busy_) {
       // abort - did you wait for tx_done indication?
+      DECOM_LOG_WARN("Transmission already in progress, data not accepted");
       return false;
     }
 
+    tx_busy_   = true;
     tx_msg_ = data;     // store a cheap copy
-    tx_eid_ = id;
+    tx_eid_    = id;      // store the id
     tx_offset_ = 0U;
 
     // start transmission
     return send_segment();
-  }
-
-
-  inline bool is_open() const
-  {
-    return device_handle_ != INVALID_HANDLE_VALUE;
   }
 
 
@@ -400,16 +307,22 @@ private:
   {
     if (tx_offset_ < tx_msg_.size())
     {
-      // convert msg to _static_ linear buffer which is needed by WriteFile
-      (void)memset(tx_buf_, 0, device_info_.output_report_length + 1U);               // clear buffer for zero padding
-      tx_buf_[0] = static_cast<std::uint8_t>(tx_eid_.port());                         // byte 0 is report id
+      // convert msg to vector - linear array is needed by WriteFile
+      tx_buf_.clear();
+      tx_buf_.resize(device_info_.output_report_length + 1U);
+      tx_buf_[0] = static_cast<std::uint8_t>(tx_eid_.port());                         // byte 0 is the report id
       tx_msg_.get(&tx_buf_[1], device_info_.output_report_length - 1U, tx_offset_);   // copy msg
+
       tx_offset_ += device_info_.output_report_length - 1U;
 
       DWORD bytes_written = 0U;
-      tx_busy_ = true;
-      if (::WriteFile(device_handle_, static_cast<LPCVOID>(&tx_buf_[0]), device_info_.output_report_length, &bytes_written, &tx_overlapped_)) {
-        if (bytes_written != device_info_.output_report_length) {
+
+      // init overlapped struct
+      memset(&tx_overlapped_, 0, sizeof(tx_overlapped_));
+      tx_overlapped_.hEvent = events_[ev_transmit];
+
+      if (::WriteFile(device_handle_, static_cast<LPCVOID>(&tx_buf_[0]), static_cast<DWORD>(tx_buf_.size()), &bytes_written, &tx_overlapped_)) {
+        if (bytes_written != tx_buf_.size()) {
           // error - bytes not written
           tx_busy_ = false;
           return false;
@@ -419,6 +332,7 @@ private:
         if (::GetLastError() != ERROR_IO_PENDING) {
           // sending error - wrong report id, device not ready etc.
           tx_busy_ = false;
+          DECOM_LOG_CRIT("Sending error - should not happen, check it!");
           return false;
         }
       }
@@ -436,7 +350,7 @@ public:
   /**
    * HID device info structure
    */
-  struct hid_device_info {
+  typedef struct tag_hid_device_info_type {
     std::string   path;                 // platform specific device path - used for open()
     std::uint16_t vendor_id;            // vendor ID
     std::uint16_t product_id;           // product ID
@@ -449,7 +363,7 @@ public:
     std::uint16_t output_report_length; // OutputReportByteLength
     std::uint16_t input_report_length;  // InputReportByteLength
     std::int32_t  interface_number;     // USB interface which represents this logical device
-  };
+  } hid_device_info_type;
 
 
   /**
@@ -461,10 +375,10 @@ public:
    * \param product_id The Product ID (PID) of the device to match
    * \return Returns a vector of available/matching devices
    */
-  std::vector<struct hid_device_info> enumerate(std::uint16_t vendor_id = 0U, std::uint16_t product_id = 0U)
+  std::vector<hid_device_info_type> enumerate(std::uint16_t vendor_id = 0U, std::uint16_t product_id = 0U)
   {
-    std::vector<hid_device_info> result;
-    struct hid_device_info       device_info;
+    std::vector<hid_device_info_type> result;
+   hid_device_info_type device_info;
 
     // windows objects for interacting with the driver
     SP_DEVINFO_DATA devinfo_data;
@@ -663,16 +577,15 @@ public:
     HANDLE handle = ::CreateFileA(
       path,
       GENERIC_READ | GENERIC_WRITE,
-      0,
+      0U,
       NULL,
       OPEN_EXISTING,
       FILE_FLAG_OVERLAPPED,
-      0
+      NULL
     );
 
     if (handle == INVALID_HANDLE_VALUE) {
-      // error opening the device. Some devices must be opened
-      // with sharing enabled (even though they are only opened once)
+      // error opening the device. Some devices must be opened with sharing enabled (even though they are only opened once)
       handle = ::CreateFileA(
         path,
         GENERIC_WRITE | GENERIC_READ,
@@ -680,7 +593,7 @@ public:
         NULL,
         OPEN_EXISTING,
         FILE_FLAG_OVERLAPPED,
-        0
+        NULL
       );
     }
 
@@ -690,8 +603,8 @@ public:
 
   HANDLE open_device(std::uint16_t vendor_id, std::uint16_t product_id, const char* serial_number)
   {
-    std::vector<struct hid_device_info> devs = enumerate(vendor_id, product_id);
-    for (std::vector<struct hid_device_info>::const_iterator it = devs.begin(); it != devs.end(); ++it) {
+    std::vector<hid_device_info_type> devs = enumerate(vendor_id, product_id);
+    for (std::vector<hid_device_info_type>::const_iterator it = devs.begin(); it != devs.end(); ++it) {
       if (serial_number == it->serial_number) {
         return open_device(it->path.c_str());
       }
@@ -702,37 +615,108 @@ public:
   }
 
 
+/////////////////////////////////////////////////////////////////////////////////////
+
 private:
   /**
    * Check if the device is open
-   * \return True if the device is open
+   * \return true if the device is open
    */
+  inline bool is_open() const
+  { return device_handle_ != INVALID_HANDLE_VALUE; }
 
-  struct hid_device_info device_info_;      // info of opened device
 
-  HMODULE lib_handle_;                      // handle to hid library
-  HANDLE device_handle_;                    // handle to the opened device
-  HANDLE thread_handle_;                    // worker thread handle
-  OVERLAPPED tx_overlapped_;                // tx overlapped structure
+  static void worker_thread(void* arg)
+  {
+    usbhid* u = static_cast<usbhid*>(arg);
+    DWORD bytes_read, bytes_written;
 
-  decom::msg tx_msg_;                       // tx msg
-  std::uint8_t* tx_buf_;                    // tx linear buffer
-  decom::eid tx_eid_;                       // tx eid (report id)
-  decom::msg::size_type tx_offset_;         // tx offset
-  volatile bool tx_busy_;                   // tx transfer running
+    // validate port - MUST be open and active
+    DECOM_LOG_VERIFY(u->is_open());
 
-//  static void worker(void* arg);            // worker thread
-//  bool send_segment();                      // helper function to send segments
-//  HANDLE open_device(const char* path);     // open hid device by its pathname
-//  HANDLE open_device(std::uint16_t vendor_id, std::uint16_t product_id, const char* serial_number = "");
-  std::vector<std::uint8_t> tmp_buf_;       // static temp buffer
+    for (;;)
+    {
+      if (!u->rx_busy_) {
+        // issue read operation
+        u->rx_busy_ = true;
+        memset(&u->rx_overlapped_, 0, sizeof(u->rx_overlapped_));
+        u->rx_overlapped_.hEvent = u->events_[ev_receive];
+        if (::ReadFile(u->device_handle_, u->rx_buf_, DECOM_COM_USBHID_RX_BUFSIZE, &bytes_read, &u->rx_overlapped_)) {
+          // data is available, dwBytesRead is valid
+          if (bytes_read) {
+            msg data(u->rx_buf_ + 1U, u->rx_buf_ + bytes_read);   // first byte is report id
+            u->communicator::receive(data);
+          }
+          u->rx_busy_ = false;
+        }
+        else {
+          if (::GetLastError() != ERROR_IO_PENDING) {
+            // com error, port closed etc.
+            DECOM_LOG_ASSERT(false);
+            u->rx_busy_ = false;
+          }
+        }
+      }
 
+      switch (::WaitForMultipleObjects(ev_max, reinterpret_cast<::HANDLE*>(u->events_), FALSE, INFINITE))
+      {
+        case WAIT_OBJECT_0 + ev_terminate :
+          // kill event - terminate worker thread
+          _endthreadex(0);
+          return;
+
+        case WAIT_OBJECT_0 + ev_transmit :
+          // tx event
+          if (::GetOverlappedResult(u->device_handle_, &u->tx_overlapped_, &bytes_written, FALSE) && bytes_written) {
+            // okay - byte written, any more data segments to send
+            if (u->tx_offset_ < u->tx_msg_.size()) {
+              // send next segment
+              if (!u->send_segment()) {
+                // serious error - inform upper layer
+                u->communicator::indication(tx_error, u->tx_eid_);
+              }
+            }
+            else {
+              // data complete, inform upper layer
+              u->communicator::indication(tx_done, u->tx_eid_);
+            }
+          }
+          else {
+            // error - bytes not written
+            // discard any outstanding send data
+            u->communicator::indication(tx_error, u->tx_eid_);
+          }
+          (void)::ResetEvent(u->events_[ev_transmit]);    // manual reset event
+          u->tx_busy_ = false;
+          break;
+
+        case WAIT_OBJECT_0 + usbhid::ev_receive :
+          // rx event
+          if (::GetOverlappedResult(u->device_handle_, &u->rx_overlapped_, &bytes_read, FALSE) && bytes_read) {
+            // bytes received, pass data to upper layer
+            msg data(u->rx_buf_ + 1U, u->rx_buf_ + bytes_read);     // first byte is report id
+            u->communicator::receive(data, u->rx_buf_[0]);          // use report id as channel
+          }
+          (void)::ResetEvent(u->events_[ev_receive]);     // manual reset event
+          u->rx_busy_ = false;
+          break;
+
+        case WAIT_TIMEOUT:
+          // should never happen
+          DECOM_LOG_ASSERT(false);
+          break;
+
+        default:
+          break;
+      }
+    }
+  }
 
 
   // returns information about the device
-  struct hid_device_info get_device_info(::HANDLE device_handle)
+  hid_device_info_type get_device_info(HANDLE device_handle)
   {
-    struct hid_device_info device_info;
+    hid_device_info_type device_info;
 
     // get the usage page and usage of the device
     PHIDP_PREPARSED_DATA pp_data = NULL;
@@ -790,12 +774,28 @@ private:
   }
 
 
+  hid_device_info_type device_info_;    // info of opened device
 
+  HMODULE         lib_handle_;          // handle to hid library
+  HANDLE          device_handle_;       // handle to the opened device
+  HANDLE          thread_handle_;       // worker thread handle
+  OVERLAPPED      tx_overlapped_;       // tx overlapped structure
+  OVERLAPPED      rx_overlapped_;       // rx overlapped structure
+  decom::msg      tx_msg_;              // tx msg
+  decom::eid      tx_eid_;              // tx eid (report id)
+  std::size_t     tx_offset_;           // tx offset
+
+  std::vector<std::uint8_t> tmp_buf_;   // static temp buffer
+  std::vector<std::uint8_t> tx_buf_;    // static linear tx buffer
+  std::uint8_t              rx_buf_[DECOM_COM_USBHID_RX_BUFSIZE];   // receive buffer
+
+  volatile bool   tx_busy_;             // tx transfer running
+  volatile bool   rx_busy_;             // rx transfer running
 
   enum {
     ev_terminate = 0,
-    ev_receive   = 1,
-    ev_transmit  = 2,
+    ev_transmit  = 1,
+    ev_receive   = 2,
     ev_max       = 3
   };
 
