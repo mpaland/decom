@@ -26,7 +26,9 @@
 // \brief Serial COM port communication class
 //
 // This class abstracts the Windows serial COM port.
-// All kind of serial ports (RS232, USB, virtual etc.) are supported
+// It should be as close as possible to the MS standard implementation of
+// overlapped IO handling.
+// All kind of serial ports (RS232, USB, virtual etc.) are supported.
 // A worker thread for overlapped/asynchronous communication is used.
 //
 // \todo Add functions for interbyte timing etc.
@@ -45,6 +47,14 @@
 
 /////////////////////////////////////////////////////////////////////
 
+// defines the receive buffer size, but the value is likely arbitrary
+#ifndef DECOM_COM_SERIAL_RX_BUFSIZE
+#define DECOM_COM_SERIAL_RX_BUFSIZE   32768U
+#endif
+
+/////////////////////////////////////////////////////////////////////
+
+
 namespace decom {
 namespace com {
 
@@ -53,28 +63,30 @@ class serial : public communicator
 {
 public:
   // params
-  typedef enum enum_parity_type {
-    no_parity = 0,
-    odd_parity,
-    even_parity,
-    mark_parity,
-    space_parity
+  typedef enum tag_stopbit_type {
+    stopbit_0 = 0,              // 0   stopbits (uncommon)
+    stopbit_05,                 // 0.5 stopbits
+    stopbit_1,                  // 1   stopbit
+    stopbit_15,                 // 1.5 stopbits
+    stopbit_2                   // 2   stopbits
+  } stopbit_type;
+
+  typedef enum tag_parity_type {
+    parity_none = 0,            // no parity
+    parity_odd,                 // odd parity bit
+    parity_even,                // even parity bit
+    parity_mark,                // mark parity bit
+    parity_space                // space parity bit
   } parity_type;
 
-  typedef enum enum_stopbits_type {
-    one_stopbit = 0,
-    one5_stopbits,
-    two_stopbits
-  } stopbits_type;
+  typedef enum tag_flowctrl_type {
+    flowctrl_none = 0,          // no flow control
+    flowctrl_rts_cts,           // RTS/CTS flow control
+    flowctrl_dtr_dsr,           // DTR/DSR flow control
+    flowctrl_xon_xoff           // XON/XOFF flow control
+  } flowctrl_type;
 
-  typedef enum enum_handshake_type {
-    no_handshake = 0,
-    cts_rts_handshake,
-    dsr_dtr_handshake,
-    xon_xoff_handshake
-  } handshake_type;
-
-
+  
 public:
   /**
    * Param ctor, sets the default port parameters
@@ -86,32 +98,28 @@ public:
    * \param name Layer name
    */
   serial(std::uint32_t baudrate,
-         std::uint8_t databits    = 8U,
-         parity_type parity       = no_parity,
-         stopbits_type stopbits   = one_stopbit,
-         handshake_type handshake = no_handshake,
-         const char* name         = "com_serial"
+         std::uint8_t  databits  = 8U,
+         parity_type   parity    = parity_none,
+         stopbit_type  stopbits  = stopbit_1,
+         flowctrl_type handshake = flowctrl_none,
+         const char* name        = "com_serial"
         )
     : communicator(name)   // it's VERY IMPORTANT to call the base class ctor HERE!!!
+    , port_(0U)
+    , baudrate_(baudrate)
+    , databits_(databits)
+    , parity_(parity)
+    , stopbits_(stopbits)
+    , handshake_(handshake)
+    , com_handle_(INVALID_HANDLE_VALUE)
+    , thread_handle_(INVALID_HANDLE_VALUE)
+    , tx_busy_(false)
+    , rx_busy_(false)
   {
-    events_[ev_terminate] = ::CreateEvent(NULL, TRUE,  FALSE, NULL);
-    events_[ev_transmit]  = ::CreateEvent(NULL, FALSE, FALSE, NULL);    // auto reset event
-    events_[ev_receive]   = ::CreateEvent(NULL, FALSE, FALSE, NULL);    // auto reset event
-
-    thread_handle_ = INVALID_HANDLE_VALUE;
-    com_handle_    = INVALID_HANDLE_VALUE;
-
-    memset(&tx_overlapped_, 0, sizeof(tx_overlapped_));
-    tx_overlapped_.hEvent = events_[ev_transmit];
-    tx_busy_ = false;
-
-    // params
-    port_      = 0U;
-    baudrate_  = baudrate;
-    databits_  = databits;
-    parity_    = parity;
-    stopbits_  = stopbits;
-    handshake_ = handshake;
+    // create events
+    events_[ev_terminate] = ::CreateEvent(NULL, TRUE, FALSE, NULL);    // manual reset event
+    events_[ev_transmit]  = ::CreateEvent(NULL, TRUE, FALSE, NULL);    // manual reset event
+    events_[ev_receive]   = ::CreateEvent(NULL, TRUE, FALSE, NULL);    // manual reset event
   }
 
 
@@ -129,7 +137,6 @@ public:
   }
 
 
-public:
   /**
    * Called by upper layer to open this layer
    * \param address The port to open, allowed are 'COM1', 'COM2' etc.
@@ -153,7 +160,7 @@ public:
     std::stringstream port;
     port << "\\\\.\\" << address;   // extend to complete port address (like '\\.\COM1')
 
-    close();  // just in case layer was already open
+    close();                        // just in case layer was already open
 
     // call CreateFile to open the COM port
     com_handle_ = ::CreateFileA(
@@ -182,11 +189,11 @@ public:
 
     // set timeouts
     COMMTIMEOUTS cto;
-    cto.ReadIntervalTimeout = MAXDWORD;
-    cto.ReadTotalTimeoutMultiplier = MAXDWORD;
-    cto.ReadTotalTimeoutConstant = MAXDWORD - 1;
+    cto.ReadIntervalTimeout         = MAXDWORD;
+    cto.ReadTotalTimeoutMultiplier  = MAXDWORD;
+    cto.ReadTotalTimeoutConstant    = MAXDWORD - 1;
     cto.WriteTotalTimeoutMultiplier = 0U;
-    cto.WriteTotalTimeoutConstant = 0U;
+    cto.WriteTotalTimeoutConstant   = 0U;
     if (!::SetCommTimeouts(com_handle_, &cto)) {
       DECOM_LOG_ERROR("Error setting timeouts");
       // error in set timeouts
@@ -201,7 +208,7 @@ public:
     thread_handle_ = reinterpret_cast<HANDLE>(::_beginthreadex(
       NULL,
       0U,
-      reinterpret_cast<unsigned(__stdcall *)(void*)>(&serial::worker_thread),
+      reinterpret_cast<unsigned(__stdcall *)(void*)>(&worker_thread),
       reinterpret_cast<void*>(this),
       CREATE_SUSPENDED,
       NULL
@@ -237,7 +244,7 @@ public:
     if (thread_handle_ != INVALID_HANDLE_VALUE)
     {
       (void)::SetEvent(events_[ev_terminate]);
-      (void)::WaitForSingleObject(thread_handle_, 5000U);  // wait 3 sec for thread termination
+      (void)::WaitForSingleObject(thread_handle_, 3000U);   // wait 3 sec for thread termination
       (void)::CloseHandle(thread_handle_);
       thread_handle_ = INVALID_HANDLE_VALUE;
     }
@@ -277,28 +284,34 @@ public:
     // return false if an overlapped transfer is in progress, means no new data can be accepted
     // this is mostly the case when the upper layer didn't wait for tx_done indication
     if (tx_busy_) {
-      DECOM_LOG_WARN("Transmission already in progress");
+      DECOM_LOG_WARN("Transmission already in progress, data not accepted");
       return false;
     }
+
+    tx_busy_ = true;
 
     // convert msg to vector - linear array is needed by WriteFile
     tx_buf_.clear();
     tx_buf_.reserve(data.size());
     tx_buf_.insert(tx_buf_.begin(), data.begin(), data.end());
 
-    DWORD bytes_written = 0;
-    tx_busy_ = true;
+    DWORD bytes_written = 0U;
+
+    // init overlapped struct
+    memset(&tx_overlapped_, 0, sizeof(tx_overlapped_));
+    tx_overlapped_.hEvent = events_[ev_transmit];
+
     if (::WriteFile(com_handle_, static_cast<LPCVOID>(&tx_buf_[0]), static_cast<DWORD>(tx_buf_.size()), &bytes_written, &tx_overlapped_)) {
       // okay - byte written
       if (bytes_written != tx_buf_.size()) {
-        // error - byte not written
+        // error - size mismatch, data not written
         tx_busy_ = false;
         return false;
       }
     }
     else {
       if (::GetLastError() != ERROR_IO_PENDING) {
-        // sending error - should never happen - check it!
+        // sending error - this should never happen - check it!
         tx_busy_ = false;
         DECOM_LOG_CRIT("Sending error - should not happen, check it!");
         return false;
@@ -310,8 +323,11 @@ public:
   }
 
 
-  ////////////// additional functions ///////////
+  ////////////////////////////////////////////////////////////////////////
+  // L A Y E R   A P I
+
 public:
+
   /**
    * Set communication parameter
    * \param baudrate The baudrate given in [baud]
@@ -322,10 +338,10 @@ public:
    * \return true if successful
    */
   bool set_param(std::uint32_t baudrate,
-                 std::uint8_t databits    = 8U,
-                 parity_type parity       = no_parity,
-                 stopbits_type stopbits   = one_stopbit,
-                 handshake_type handshake = no_handshake)
+                 std::uint8_t  databits  = 8U,
+                 parity_type   parity    = parity_none,
+                 stopbit_type  stopbits  = stopbit_1,
+                 flowctrl_type handshake = flowctrl_none)
   {
     // validate port
     if (!is_open()) {
@@ -336,30 +352,30 @@ public:
     memset(&dcb, 0, sizeof(dcb));
     dcb.DCBlength = sizeof(dcb);
 
-    dcb.fBinary  = TRUE;                    // only binary mode
-    dcb.fParity  = (parity != no_parity);   // parity
-    dcb.BaudRate = (DWORD)baudrate;         // setup the baud rate
-    dcb.fOutxCtsFlow = (handshake == cts_rts_handshake);
-    dcb.fOutxDsrFlow = (handshake == dsr_dtr_handshake);
-    dcb.fDtrControl  = (handshake == dsr_dtr_handshake ? DTR_CONTROL_HANDSHAKE : DTR_CONTROL_ENABLE);
-    dcb.fDsrSensitivity = FALSE;
+    dcb.fBinary  = TRUE;                      // only binary mode
+    dcb.fParity  = (parity != parity_none);   // parity
+    dcb.BaudRate = (DWORD)baudrate;           // setup the baud rate
+    dcb.fOutxCtsFlow = (handshake == flowctrl_rts_cts);
+    dcb.fOutxDsrFlow = (handshake == flowctrl_dtr_dsr);
+    dcb.fDtrControl  = (handshake == flowctrl_dtr_dsr ? DTR_CONTROL_HANDSHAKE : DTR_CONTROL_ENABLE);
+    dcb.fDsrSensitivity   = FALSE;
     dcb.fTXContinueOnXoff = FALSE;
-    dcb.fOutX = (handshake == xon_xoff_handshake);
-    dcb.fInX  = (handshake == xon_xoff_handshake);
+    dcb.fOutX = (handshake == flowctrl_xon_xoff);
+    dcb.fInX  = (handshake == flowctrl_xon_xoff);
     dcb.fErrorChar = FALSE;
     dcb.fNull = FALSE;
-    dcb.fRtsControl = (handshake == cts_rts_handshake ? RTS_CONTROL_HANDSHAKE : RTS_CONTROL_ENABLE);
+    dcb.fRtsControl = (handshake == flowctrl_rts_cts ? RTS_CONTROL_HANDSHAKE : RTS_CONTROL_ENABLE);
     dcb.fAbortOnError = FALSE;
-    dcb.XonLim = 1024U;           // Xon limit
-    dcb.XoffLim = 1024U;           // Xoff limit
-    dcb.ByteSize = (BYTE)databits;  // setup the data bits
-    dcb.Parity = (BYTE)parity;    // setup the parity
-    dcb.StopBits = (BYTE)stopbits;  // setup the stop bits
-    dcb.XonChar = 0x11U;
+    dcb.XonLim   = 1024U;               // Xon limit
+    dcb.XoffLim  = 1024U;               // Xoff limit
+    dcb.ByteSize = (BYTE)databits;      // setup the data bits
+    dcb.Parity   = (BYTE)parity;        // setup the parity
+    dcb.StopBits = (BYTE)stopbits - 2U; // setup the stop bits
+    dcb.XonChar  = 0x11U;
     dcb.XoffChar = 0x13U;
     dcb.ErrorChar = 0x00U;
-    dcb.EofChar = 0x04U;
-    dcb.EvtChar = 0x00U;
+    dcb.EofChar  = 0x04U;
+    dcb.EvtChar  = 0x00U;
 
     // apply settings
     return ::SetCommState(com_handle_, &dcb) != FALSE;
@@ -417,63 +433,50 @@ private:
   // worker thread
   static void worker_thread(void* arg)
   {
-    // see http://support.microsoft.com/kb/156932 !!
+    // see https://msdn.microsoft.com/en-us/library/ff802693.aspx
+    // and http://support.microsoft.com/kb/156932
     // and http://www.daniweb.com/software-development/cpp/threads/8020
 
     serial* s = static_cast<serial*>(arg);
-
-    // defines the receive buffer size
-    #define DECOM_COM_SERIAL_RX_BUFSIZE 32768
-
-    BYTE buf[DECOM_COM_SERIAL_RX_BUFSIZE];  // receive buffer
     DWORD bytes_read, bytes_written;
 
     // validate port - MUST be open and active
-    if (!s->is_open()) {
-      DECOM_LOG2(DECOM_LOG_LEVEL_CRIT, s->name_, "COM port is not open - please check!");
-      return;
-    }
-
-    OVERLAPPED rx_overlapped;
-    memset(&rx_overlapped, 0, sizeof(rx_overlapped));
-    rx_overlapped.hEvent = s->events_[ev_receive];
+    DECOM_LOG_VERIFY(s->is_open());
 
     for (;;)
     {
-      // issue read operation
-      if (::ReadFile(s->com_handle_, buf, DECOM_COM_SERIAL_RX_BUFSIZE, &bytes_read, &rx_overlapped)) {
-        // data is available, dwBytesRead is valid
-        if (bytes_read) {
-          msg data(buf, buf + bytes_read);
-          s->communicator::receive(data);
-        }
-      }
-      else {
-        if (::GetLastError() != ERROR_IO_PENDING) {
-          // com error, port closed etc.
-          DECOM_LOG2(DECOM_LOG_LEVEL_CRIT, s->name_, "COM port error - please check!");
-        }
-
-        switch (::WaitForMultipleObjects(serial::ev_max, reinterpret_cast<HANDLE*>(s->events_), FALSE, INFINITE))
-        {
-        case WAIT_OBJECT_0:
-          // kill event - terminate worker thread
-          DECOM_LOG2(DECOM_LOG_LEVEL_DEBUG, s->name_, "Terminating worker-thread gracefully");
-          return;
-
-        case WAIT_OBJECT_0 + serial::ev_receive:
-          // rx event
-          if (::GetOverlappedResult(s->com_handle_, &rx_overlapped, &bytes_read, TRUE) && bytes_read) {
-            // bytes received, pass data to upper layer
-            msg data(buf, buf + bytes_read);
+      if (!s->rx_busy_) {
+        // issue read operation
+        s->rx_busy_ = true;
+        memset(&s->rx_overlapped_, 0, sizeof(s->rx_overlapped_));
+        s->rx_overlapped_.hEvent = s->events_[ev_receive];
+        if (::ReadFile(s->com_handle_, s->rx_buf_, DECOM_COM_SERIAL_RX_BUFSIZE, &bytes_read, &s->rx_overlapped_)) {
+          // data is available, dwBytesRead is valid
+          if (bytes_read) {
+            msg data(s->rx_buf_, s->rx_buf_ + bytes_read);
             s->communicator::receive(data);
           }
-          (void)::ResetEvent(s->events_[ev_receive]);
-          break;
- 
-        case WAIT_OBJECT_0 + serial::ev_transmit:
+          s->rx_busy_ = false;
+        }
+        else {
+          if (::GetLastError() != ERROR_IO_PENDING) {
+            // com error, port closed etc.
+            DECOM_LOG_ASSERT(false);
+            s->rx_busy_ = false;
+          }
+        }
+      }
+
+      switch (::WaitForMultipleObjects(ev_max, reinterpret_cast<HANDLE*>(s->events_), FALSE, INFINITE))
+      {
+        case WAIT_OBJECT_0 + ev_terminate :
+          // kill event - terminate worker thread
+          _endthreadex(0);
+          return;
+
+        case WAIT_OBJECT_0 + ev_transmit :
           // tx event
-          if (::GetOverlappedResult(s->com_handle_, &s->tx_overlapped_, &bytes_written, TRUE) && bytes_written) {
+          if (::GetOverlappedResult(s->com_handle_, &s->tx_overlapped_, &bytes_written, FALSE) && bytes_written) {
             // okay - bytes written, inform upper layer
             s->communicator::indication(tx_done);
           }
@@ -481,17 +484,28 @@ private:
             // error - bytes not written
             s->communicator::indication(tx_error);
           }
+          (void)::ResetEvent(s->events_[ev_transmit]);    // manual reset event
           s->tx_busy_ = false;
           break;
 
+        case WAIT_OBJECT_0 + ev_receive :
+          // rx event
+          if (::GetOverlappedResult(s->com_handle_, &s->rx_overlapped_, &bytes_read, FALSE) && bytes_read) {
+            // bytes received, pass data to upper layer
+            msg data(s->rx_buf_, s->rx_buf_ + bytes_read);
+            s->communicator::receive(data);
+          }
+          (void)::ResetEvent(s->events_[ev_receive]);     // manual reset event
+          s->rx_busy_ = false;
+          break;
+
         case WAIT_TIMEOUT:
-          // should never happen
-          DECOM_LOG2(DECOM_LOG_LEVEL_CRIT, s->name_, "WAIT TIMEOUT - should not happen!");
+          // should never happen in infinite waiting
+          DECOM_LOG_ASSERT(false);
           break;
 
         default:
           break;
-        }
       }
     }
   }
@@ -502,14 +516,18 @@ private:
   std::uint8_t    port_;
   std::uint8_t    databits_;
   parity_type     parity_;
-  stopbits_type   stopbits_;
-  handshake_type  handshake_;
+  stopbit_type    stopbits_;
+  flowctrl_type   handshake_;
 
-  HANDLE com_handle_;                   // COM port handle
-  HANDLE thread_handle_;                // worker thread handle
-  OVERLAPPED tx_overlapped_;            // tx overlapped structure
+  HANDLE          com_handle_;          // COM port handle
+  HANDLE          thread_handle_;       // worker thread handle
+  OVERLAPPED      tx_overlapped_;       // tx overlapped structure
+  OVERLAPPED      rx_overlapped_;       // rx overlapped structure
   std::vector<std::uint8_t> tx_buf_;    // static linear tx buffer
-  volatile bool tx_busy_;               // tx transfer running
+  std::uint8_t    rx_buf_[DECOM_COM_SERIAL_RX_BUFSIZE];   // receive buffer
+
+  volatile bool   tx_busy_;             // tx transfer running
+  volatile bool   rx_busy_;             // rx transfer running
 
   enum {
     ev_terminate = 0,
