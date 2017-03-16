@@ -35,7 +35,6 @@
 
 #include <cstdint>
 #include <cstddef>    // for size_t
-#include <string.h>   // for memcpy
 
 // decom configuration file
 #include "decom_cfg.h"
@@ -104,14 +103,14 @@ struct eid
 
   // is_any test
   inline bool is_any() const
-  { return (this->port_ == 0U) && (this->addr_.addr64[0] == 0U) && (this->addr_.addr64[1] == 0U); }
+  { return (port_ == 0U) && (addr_.addr64[0] == 0U) && (addr_.addr64[1] == 0U); }
 
 
   // assignment operator
   eid& operator=(eid const& id)
   {
-    ::memcpy(this->addr_.addr, id.addr().addr, sizeof(this->addr_.addr));
-    this->port_ = id.port();
+    addr_ = id.addr();
+    port_ = id.port();
     return *this;
   }
 
@@ -119,9 +118,9 @@ struct eid
   // comparisons
   inline bool operator==(eid const& other) const
   {
-    return (this->port_ == other.port())                &&
-      (this->addr_.addr64[0] == other.addr().addr64[0]) &&
-      (this->addr_.addr64[1] == other.addr().addr64[1]);
+    return (port_ == other.port())                &&
+      (addr_.addr64[0] == other.addr().addr64[0]) &&
+      (addr_.addr64[1] == other.addr().addr64[1]);
   }
 
 
@@ -149,7 +148,8 @@ protected:
   /**
    * no default ctor
    */
-  layer() { }
+  layer()
+  { }
 
 
 public:
@@ -307,7 +307,7 @@ protected:
   // layer statistics
 #ifdef DECOM_STATS
 public:
-  typedef struct struct_statistic_type {
+  typedef struct tag_statistic_type {
     std::uint64_t bytes_in;
     std::uint64_t bytes_out;
     std::uint32_t packets_in;
