@@ -162,7 +162,7 @@ public:
   }
 
 
-  void file::worker(void* arg)
+  static void file::worker(void* arg)
   {
     file* f = static_cast<file*>(arg);
 
@@ -306,9 +306,8 @@ private:
   }
 
 
-  std::thread thread_;              // worker thread object
-  static void worker(void* arg);    // worker thread for write file
-  volatile bool worker_end_;        // end worker thread
+  std::thread     thread_;          // worker thread object
+  volatile bool   worker_end_;      // end worker thread
   decom::util::event tx_ev_;        // transmit done indication
   std::ofstream   rx_file_;         // receive file
   bool            rx_ignore_more_;  // true to ignore more flag during reception
