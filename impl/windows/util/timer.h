@@ -53,7 +53,7 @@ namespace util {
 class timer
 {
 public:
-  typedef enum enum_priority_type {
+  typedef enum tag_priority_type {
     //                        windows mappings
     priority_idle           = THREAD_BASE_PRIORITY_IDLE,
     priority_low            = THREAD_BASE_PRIORITY_MIN,
@@ -68,9 +68,9 @@ public:
    */
   timer(priority_type prio = priority_high)
   {
-    running_ = false;   // initially not running
+    running_    = false;    // initially not running
     worker_end_ = false;
-    callback_ = nullptr;
+    callback_   = nullptr;
     trigger_handle_ = ::CreateEvent(NULL, FALSE, FALSE, NULL);
 
     // create timer thread
@@ -165,7 +165,7 @@ public:
   }
 
 
-  void timer::wait(std::chrono::microseconds microseconds)
+  inline void wait(std::chrono::microseconds microseconds)
   {
     start(microseconds, false, nullptr, nullptr);
     while (running_) {
@@ -187,11 +187,11 @@ public:
   bool start(std::chrono::microseconds period, bool periodic, void(*func)(void* arg), void* arg)
   {
     (void)::QueryPerformanceCounter(&trigger_time_);
-    period_ = period;
+    period_   = period;
     periodic_ = periodic;
-    arg_ = arg;
+    arg_      = arg;
     callback_ = func;
-    running_ = true;
+    running_  = true;
     (void)::SetEvent(trigger_handle_);
 
     return true;
@@ -202,7 +202,7 @@ public:
    * Stop the timer
    * \return true if stopped successfully
    */
-  bool stop()
+  inline bool stop()
   {
     running_ = false;
     (void)::SetEvent(trigger_handle_);
@@ -215,7 +215,7 @@ public:
    * Returns the time since the last (re)start of the timer
    * \return The time since the lass (re)start of the timer, -1 if timer is not running
    */
-  inline std::chrono::microseconds get_elapsed() const
+  std::chrono::microseconds get_elapsed() const
   {
     if (!running_) {
       return std::chrono::microseconds(-1);
