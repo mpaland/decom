@@ -14,6 +14,7 @@
 namespace decom {
 namespace test {
 
+
 class prot_iso15765 : public test
 {
   // TEST CASES
@@ -31,6 +32,7 @@ protected:
   void looptest()
   {
     TEST_BEGIN("looptest");
+    DECOM_LOG_NOTICE2("looptest", "iso15765 test");
 
     decom::com::loopback loop1;
     loop1.name_ = "L1";
@@ -56,9 +58,10 @@ protected:
 
     decom::msg tx, rx;
     decom::eid id = 0;
-    for (int i = 0; i < 1000; i++) {
+    for (int i = 0; i < 1000U; i++) {
       tx.push_back((std::uint8_t)i);
     }
+
     gen1.write(tx, id);
     decom::util::timer::sleep(std::chrono::milliseconds(100));
     gen2.read(rx, id, std::chrono::seconds(100));
@@ -70,6 +73,7 @@ protected:
   void SFtest()
   {
     TEST_BEGIN("SF Test");
+    DECOM_LOG_NOTICE2("SF test", "iso15765 test");
 
     decom::com::generic gen1;
     decom::prot::debug dbg1(&gen1);
@@ -83,7 +87,7 @@ protected:
     tx.push_back(1);
     tx.push_back(5);
     tx.push_back(9);
-    gen2.write(tx, 10);
+    gen2.write(tx, 10, false, false);
     bool more;
     gen1.read(rx, id, more);
 
@@ -101,12 +105,13 @@ protected:
   void CFtest()
   {
     TEST_BEGIN("CF Test");
+    DECOM_LOG_NOTICE2("CF test", "iso15765 test");
 
     decom::com::generic gen_com;
     decom::prot::debug dbg1(&gen_com);
     decom::prot::iso15765 tp(&dbg1, 50, 3, 4095);
     decom::dev::generic gen_dev(&tp);
-    tp.use_zero_padding_ = false;
+    tp.set_zero_padding(false);
 
     gen_dev.open();
 
@@ -120,7 +125,7 @@ protected:
     tx.push_back(6);
     tx.push_back(7);
     tx.push_back(8);
-    gen_dev.write(tx, 10);  // write 8 bytes to channel 10
+    gen_dev.write(tx, 10, false, false);  // write 8 bytes to channel 10
 
     bool more;
     gen_com.read(rx, id, more);
