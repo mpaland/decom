@@ -18,32 +18,17 @@ It is intended to be a minimalistic abstraction of the OSI layer model.
 - Zero copy of message data - if possible
 
 ### Usage of STL containers
-In the moment, some decom classes use a few STL containers like <vector>.  
+In the moment, some decom classes use STL containers like `<vector>`.  
 On embedded systems special STL libs like "ustl" may be used.
 In later versions, any usage of STL containers should be avoided due to dynamic memory management, which makes decom not suitable for automotive and small embedded applications.
 
+## Class overview
 The following layer classification is used:
 
-## Device layer
-This is the top most layer, often referred as the application layer (7) in OSI model.
-This upper layer has only one interface to its lower layer and device specific functions which are used by the application (like read() or write()).
-The namespace for devices is `decom::dev`.
+![](doc/layer.svg)
 
-## Protocol layer
-This layer has two interfaces. One to the upper layer and one to the lower layer. Layer 3-6 in OSI model.
-Typically a protocol layer does clothing, stripping, checksum calculations, flow control etc.
-Any desired count of protocol layers can be chained together.
-Protocols may be inserted/deleted dynamically out of the stack. Dynamic object creation is supported.
-Try to avoid using threads in protocol layers cause not all platforms may support threads, use `util::timer` instead.
-The namespace for protocols is `decom::prot`.
-
-## Communication layer
-This is the lowest OSI layer (2). It has only one interface to an upper layer and sends/receives data to/from the hardware or OS API/HAL.
-This layer is arcitecture dependent.
-The namespace for communicators is `decom::com`.
-
-## Mandatory layer functions
-Each layer consists of the decom standard interface routines (defined in 'layer.h') to pass and receive data from the upper and lower layer. These are:
+The decom stack consists of exactly one com (communicator), one dev (device) and any number of prots (protocols).  
+Interaction between the layers is done by the following 5 functions:
 
 - `open()`
   Open this layer to send/receive data.
@@ -57,7 +42,29 @@ Each layer consists of the decom standard interface routines (defined in 'layer.
   Called by lower layer to indicate a status code/condition to this layer.
 
 These functions MUST be implemented by every layer.
-Further each layer can have specific API functions to set layer specific protocol params like baudrate, timings, flow control etc. e.g. and can have a special param ctor.
+ Each layer can have further specific API functions to set layer specific protocol params like baudrate, timings, flow control etc. e.g. and can have a special param ctor(s).
+
+
+### Device layer
+This is the top most layer, often referred as the application layer (7) in OSI model.
+This upper layer has only one interface to its lower layer and device specific functions which are used by the application (like read() or write()).
+The namespace for devices is `decom::dev`.
+
+### Protocol layer
+This layer has two interfaces. One to the upper layer and one to the lower layer. It's layer (3) to (6) in OSI model.
+Typically a protocol layer does clothing, stripping, checksum calculations, flow control etc.
+Any desired count of protocol layers can be chained together.
+Protocols may be inserted/deleted dynamically out of the stack. Dynamic object creation is supported.
+Try to avoid using threads in protocol layers cause not all platforms may support threads, use `util::timer` instead.
+The namespace for protocols is `decom::prot`.
+
+### Communication layer
+This is the lowest OSI layer (2). It has only one interface to an upper layer and sends/receives data to/from the hardware or OS API/HAL.
+This layer is arcitecture dependent.
+The namespace for communicators is `decom::com`.
+
+### Mandatory layer functions
+Each layer consists of the decom standard interface routines (defined in 'layer.h') to pass and receive data from the upper and lower layer. These are:
 
 
 ## Stack creation
@@ -70,7 +77,7 @@ xmodem between a device and a communication port.
 The minimalistic stack is a device bound to a communication class without any protocol:
 
 ```c++
-// include the necessary heades, include path must include the 'decom' folder
+// include the necessary headers, include path must include the 'decom' folder
 #include "prot/prot_debug.h"
 #include "com/com_serial.h"
 #include "dev/dev_generic.h"
