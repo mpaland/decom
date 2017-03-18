@@ -43,9 +43,11 @@
 namespace decom {
 namespace com {
 
+
 class loopback : public communicator
 {
 public:
+
   /**
    * Normal com ctor
    */
@@ -66,7 +68,7 @@ public:
    */
   ~loopback()
   {
-    is_open_ = false;
+    is_open_    = false;
     worker_end_ = true;
     data_ind_.notify_all();
     thread_.join();
@@ -135,20 +137,16 @@ public:
    */
   virtual bool send(msg& data, eid const& id = eid_any, bool more = false)
   {
+    communicator::indication(tx_done, id);
     // pass the data to the other stack / counter loopback part
     if (is_open_ && counter_loopback_) {
-      txdata_type TxData;
-      TxData.data.copy(data);   // make a real copy, stacks and data are independent from each other 
-      TxData.id = id;
-      TxData.more = more;
       mutex_.lock();
-      send_queue_.push(TxData);
+      send_queue_.push({ data, id, more });
       mutex_.unlock();
       data_ind_.notify_all();
-      communicator::indication(tx_done, id);
+      return true;
     }
-
-    return true;
+    return false;
   }
 
 

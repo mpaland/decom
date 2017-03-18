@@ -234,6 +234,7 @@ public:
 
   const msg_iterator& operator++()
   {
+    DECOM_LOG_ASSERT(page_);
     if (++idx_ >= page_->tail) {
       page_ = page_->next;
       idx_  = page_ ? page_->head : 0U;
@@ -375,50 +376,13 @@ public:
   }
 
 
-  // copy ctor - THIS ctor generates a cheap copy (ref copy), not a physical second msg.
+  // copy ctor - This ctor generates a cheap copy (ref copy), not a physical second msg.
   // if a physical copy is needed use the copy() function
   msg(const msg& m)
-   : illegal_ref_(0xCCU)                  // init illegal ref
-   , name_("msg")
+    : illegal_ref_(0xCCU)                 // init illegal ref
+    , name_("msg")
   {
-    page_ = m.page_;
-    // inc all page references
-    for (msg_pool::pointer p = page_; p; p = p->next) {
-      p->ref++;
-    }
-  }
-
-
-  // dtor
-  ~msg()
-  {
-    // message goes out of scope, free all associated pages
-    for (msg_pool::pointer p = page_; p; p = p->next) {
-      get_msg_pool().page_free(p);
-    }
-  }
-
-
-  // assignment operator, make a cheap copy (inc page references)
-  msg& operator=(const msg& m)
-  {
-    clear();                          // free old pages
-    get_msg_pool().page_free(page_);  // detach old page
-    page_ = m.page_;                  // attach new pages
-
-    // inc refs of new pages
-    for (msg_pool::pointer p = page_; p; p = p->next) {
-      p->ref++;
-    }
-    return *this;
-  }
-
-
-  // copy, make a real copy  (physical)
-  msg& copy(const msg& m)
-  {
-    clear();    // free old pages
-
+    page_ = get_msg_pool().page_alloc();  // allocate new initial page out of pool
     for (msg_pool::pointer p = m.page_; p; p = p->next) {
       page_->head = m.page_->head;
       page_->tail = m.page_->tail;
@@ -433,6 +397,65 @@ public:
           // page allocation error
         }
       }
+    }
+/*
+    page_ = m.page_;
+    // inc all page references
+    for (msg_pool::pointer p = page_; p; p = p->next) {
+      p->ref++;
+    }
+*/
+  }
+
+
+  // dtor
+  ~msg()
+  {
+    // message goes out of scope, free all associated pages
+    for (msg_pool::pointer p = page_; p; p = p->next) {
+      get_msg_pool().page_free(p);
+    }
+  }
+
+
+  // assignment operator, make a real copy (physical)
+  msg& operator=(const msg& m)
+  {
+    clear();    // free old pages
+    for (msg_pool::pointer p = m.page_; p; p = p->next) {
+      page_->head = m.page_->head;
+      page_->tail = m.page_->tail;
+      (void)memcpy(page_->data + page_->head, m.page_->data + page_->head, page_->tail - page_->head);
+      if (p->next) {
+        page_->next = get_msg_pool().page_alloc();
+        if (page_->next) {
+          // success
+          page_ = page_->next;
+        }
+        else {
+          // page allocation error
+          DECOM_LOG_WARN("assignment error, no free page");
+        }
+      }
+    }
+    return *this;
+  }
+
+
+  // make a cheap copy (inc page references)
+  msg& ref_copy(const msg& m)
+  {
+    // free old pages
+    for (msg_pool::pointer p = page_; p; p = p->next) {
+      get_msg_pool().page_free(p);
+    }
+
+    // attach the pages to be copied
+    page_ = m.page_;
+
+    // inc refs of new pages
+    for (msg_pool::pointer p = page_; p; p = p->next) {
+      p->ref++;
     }
     return *this;
   }
@@ -496,7 +519,7 @@ public:
   {
     // security check
     if (!page_ || page_->ref > 1U) {
-      DECOM_LOG_ERROR("push_back() error - " << (!page_ ? "page invalid" : "pageref > 1"));
+      DECOM_LOG_WARN("push_back() - " << (!page_ ? "page invalid" : "pageref > 1"));
       return false;
     }
     // store data
@@ -524,7 +547,7 @@ public:
   {
     // security check
     if (!page_ || page_->ref > 1U) {
-      DECOM_LOG_ERROR("pop_back() error - " << (!page_ ? "page invalid" : "pageref > 1"));
+      DECOM_LOG_WARN("pop_back() - " << (!page_ ? "page invalid" : "pageref > 1"));
       return;
     }
     // decrement size
@@ -544,7 +567,7 @@ public:
   {
     // security check
     if (!page_ || page_->ref > 1) {
-      DECOM_LOG_ERROR("push_front() error - " << (!page_ ? "page invalid" : "pageref > 1"));
+      DECOM_LOG_WARN("push_front() - " << (!page_ ? "page invalid" : "pageref > 1"));
       return false;
     }
     // store data
@@ -574,7 +597,7 @@ public:
   {
     // security checks
     if (!page_ || page_->ref > 1U || page_->head == page_->tail) {
-      DECOM_LOG_ERROR("pop_front() error - " << (!page_ ? "page invalid" : "pageref > 1"));
+      DECOM_LOG_WARN("pop_front() - " << (!page_ ? "page invalid" : "pageref > 1"));
       return;
     }
     // increment start position
@@ -606,7 +629,7 @@ public:
   iterator insert(iterator position, const value_type& x)
   {
     if (!page_ || page_->ref > 1U) {
-      DECOM_LOG_ERROR("insert() error - " << (!page_ ? "page invalid" : "pageref > 1"));
+      DECOM_LOG_WARN("insert() - " << (!page_ ? "page invalid" : "pageref > 1"));
       return end();
     }
 
@@ -648,7 +671,7 @@ public:
   iterator erase(iterator position)
   {
     if (!page_ || page_->ref > 1U) {
-      DECOM_LOG_ERROR("erase() error - " << (!page_ ? "page invalid" : "pageref > 1"));
+      DECOM_LOG_WARN("erase() - " << (!page_ ? "page invalid" : "pageref > 1"));
       return end();
     }
 
@@ -725,7 +748,7 @@ public:
   {
     // security check
     if (!page_ || page_->ref > 1U) {
-      DECOM_LOG_ERROR("resize() error - page invalid or pageref > 1");
+      DECOM_LOG_WARN("resize() - " << (!page_ ? "page invalid" : "pageref > 1"));
       return false;
     }
 

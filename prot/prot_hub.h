@@ -130,13 +130,12 @@ public:
     }
     else {
       // two or more upper layers with according eid
-      msg org;
-      org.copy(data);   // make a real copy of data because any upper layer may strip/modify data
+      msg org = data;   // make a real copy of data because any upper layer may strip/modify data
       for (it = upper_layers_.begin(); it != upper_layers_.end(); ++it) {
         if ((it->eid == id || it->eid.is_any()) && it->include) {
           if (it != upper_layers_.begin()) {
             // restore data and pass fresh copy to upper layer
-            data.copy(org);
+            data = org;
           }
           // distribute data to all upper layers which have a generic (-1) or a matching channel ID
           it->layer->receive(data, id, more);

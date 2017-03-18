@@ -26,7 +26,8 @@
 // \brief Generic com interface
 // This communicator can be used as generic low level interface
 // Data written to this com is directly send to the upper layer.
-// Data received by this com is passed to the given callback function
+// Data received by this com can be read by the read() function or can be
+// passed to the given rx callback function
 //
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -49,12 +50,11 @@ public:
    */
   generic(const char* name = "com_generic")
     : communicator(name)   // it's VERY IMPORTANT to call the base class ctor HERE!!!
-  {
-    is_open_ = false;
-    rx_more_ = false;
-    rx_callback_     = nullptr;
-    rx_callback_arg_ = nullptr;
-  }
+    , is_open_(false)
+    , rx_more_(false)
+    , rx_callback_(nullptr)
+    , rx_callback_arg_(nullptr)
+  { }
 
 
   /**
@@ -115,9 +115,9 @@ public:
     {
       // lock scope - acquire buffer lock and replace data
       std::lock_guard<std::mutex> lock(rx_mutex_);
-      rx_buffer_.copy(data);
-      rx_eid_ = id;
-      rx_more_ = more;
+      rx_buffer_ = data;
+      rx_eid_    = id;
+      rx_more_   = more;
     }
 
     // notify upper layer
@@ -125,6 +125,7 @@ public:
 
     if (rx_callback_) {
       rx_callback_(rx_callback_arg_, rx_buffer_, rx_eid_, rx_more_);
+      rx_buffer_.clear();
     }
 
     return true;
@@ -208,12 +209,12 @@ public:
   {
     std::lock_guard<std::mutex> lock(rx_mutex_);
     // buffer is locked here
-    if (!is_open_ || rx_buffer_.empty()) {
-      // nothing received
+    if (rx_callback_ || !is_open_ || rx_buffer_.empty()) {
+      // nothing to do
       return false;
     }
-    data.copy(rx_buffer_);
-    id = rx_eid_;
+    data = rx_buffer_;  // make a real copy
+    id   = rx_eid_;
     more = rx_more_;
     rx_buffer_.clear();
     return true;
@@ -227,15 +228,15 @@ public:
    */
   void set_receive_callback(void* arg, void(*rx_callback)(void* arg, msg& data, eid const& id, bool more))
   {
-    rx_callback_ = rx_callback;
+    rx_callback_     = rx_callback;
     rx_callback_arg_ = arg;
   }
 
 
 private:
   bool         is_open_;            // true if layer is open
-  msg   rx_buffer_;                 // rx buffer
-  eid   rx_eid_;                    // rx eid
+  msg          rx_buffer_;          // rx buffer
+  eid          rx_eid_;             // rx eid
   bool         rx_more_;            // rx more flag
   std::mutex   rx_mutex_;           // rx mutex
   std::condition_variable rx_ind_;  // rx indication

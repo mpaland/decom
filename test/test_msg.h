@@ -58,7 +58,7 @@ protected:
   {
     TEST_BEGIN("push_back");
 
-    decom::get_msg_pool().clear_used_pages_max();
+    decom::msg::get_msg_pool().clear_used_pages_max();
 
     decom::msg m;
     for (std::uint16_t i = 0; i < DECOM_MSG_POOL_PAGE_SIZE * 4; i++) {
@@ -72,8 +72,8 @@ protected:
       TEST_CHECK(m.size() == i);
       m.pop_back();
     }
-    TEST_CHECK(decom::get_msg_pool().used_pages() == 1U);
-    TEST_CHECK(decom::get_msg_pool().used_pages_max() == 5U);
+    TEST_CHECK(decom::msg::get_msg_pool().used_pages() == 1U);
+    TEST_CHECK(decom::msg::get_msg_pool().used_pages_max() == 5U);
     TEST_END;
   }
 
@@ -82,7 +82,7 @@ protected:
   {
     TEST_BEGIN("push_front");
 
-    decom::get_msg_pool().clear_used_pages_max();
+    decom::msg::get_msg_pool().clear_used_pages_max();
 
     decom::msg m;
     for (std::uint16_t i = 0; i < DECOM_MSG_POOL_PAGE_SIZE * 4; i++) {
@@ -96,8 +96,8 @@ protected:
       TEST_CHECK(m.size() == i);
       m.pop_front();
     }
-    TEST_CHECK(decom::get_msg_pool().used_pages() == 1U);
-    TEST_CHECK(decom::get_msg_pool().used_pages_max() == 5U);
+    TEST_CHECK(decom::msg::get_msg_pool().used_pages() == 1U);
+    TEST_CHECK(decom::msg::get_msg_pool().used_pages_max() == 5U);
     TEST_END;
   }
 
@@ -193,6 +193,7 @@ protected:
   void resize()
   {
     TEST_BEGIN("resize");
+    DECOM_LOG_NOTICE2("resize", "msg test");
 
     decom::msg m(16U, 0);
     m[0] = 1;
@@ -220,6 +221,7 @@ protected:
   void copy()
   {
     TEST_BEGIN("copy/assignment");
+    DECOM_LOG_NOTICE2("copy/assignment", "msg test");
 
     decom::msg m(4U, 0);
     m[0] = 1;
@@ -229,7 +231,8 @@ protected:
     TEST_CHECK(m.size() == 4);
 
     // cheap copy 1
-    decom::msg* cc = (decom::msg*)new decom::msg(m);
+    decom::msg* cc = (decom::msg*)new decom::msg;
+    cc->ref_copy(m);
     TEST_CHECK(cc->size() == 4);
     TEST_CHECK(cc->at(0) == 1);
     TEST_CHECK(cc->at(1) == 4);
@@ -251,7 +254,8 @@ protected:
     delete cc;
 
     // cheap copy 2
-    decom::msg cc2 = m;
+    decom::msg cc2;
+    cc2.ref_copy(m);
     TEST_CHECK(cc2.size() == 4);
     TEST_CHECK(cc2[0] == 1);
     TEST_CHECK(cc2[1] == 4);
@@ -275,7 +279,7 @@ protected:
 
     // real copy
     decom::msg rc;
-    rc.copy(m);
+    rc = m;
     TEST_CHECK(rc.size() == 4);
     TEST_CHECK(rc[0] == 1);
     TEST_CHECK(rc[1] == 4);
@@ -364,24 +368,24 @@ protected:
   {
     TEST_BEGIN("capacity");
 
-    decom::get_msg_pool().clear_used_pages_max();
+    decom::msg::get_msg_pool().clear_used_pages_max();
 
     decom::msg m;
-    for (msg_pool::size_type i = 0; i < DECOM_MSG_POOL_PAGE_SIZE * (decom::get_msg_pool().max_size() - 1); i++) {
+    for (msg_pool::size_type i = 0; i < DECOM_MSG_POOL_PAGE_SIZE * (decom::msg::get_msg_pool().max_size() - 1); i++) {
       TEST_CHECK(m.size() == i);
       TEST_CHECK(m.push_back(static_cast<std::uint8_t>(i * 3)));
     }
-    for (msg_pool::size_type i = 0; i < DECOM_MSG_POOL_PAGE_SIZE * (decom::get_msg_pool().max_size() - 1); i++) {
+    for (msg_pool::size_type i = 0; i < DECOM_MSG_POOL_PAGE_SIZE * (decom::msg::get_msg_pool().max_size() - 1); i++) {
       TEST_CHECK(m[i] == (static_cast<std::uint8_t>(i * 3)));
     }
-    for (msg_pool::size_type i = 0; i < DECOM_MSG_POOL_PAGE_SIZE * (decom::get_msg_pool().max_size() - 1); i++) {
-      TEST_CHECK(m.size() == DECOM_MSG_POOL_PAGE_SIZE * (decom::get_msg_pool().max_size() - 1) - i);
+    for (msg_pool::size_type i = 0; i < DECOM_MSG_POOL_PAGE_SIZE * (decom::msg::get_msg_pool().max_size() - 1); i++) {
+      TEST_CHECK(m.size() == DECOM_MSG_POOL_PAGE_SIZE * (decom::msg::get_msg_pool().max_size() - 1) - i);
       TEST_CHECK(m[0] == (static_cast<std::uint8_t>(i * 3)));
       m.pop_front();
     }
-    TEST_CHECK(decom::get_msg_pool().max_size() == DECOM_MSG_POOL_PAGES); 
-    TEST_CHECK(decom::get_msg_pool().used_pages() == 1U);
-    TEST_CHECK(decom::get_msg_pool().used_pages_max() == decom::get_msg_pool().max_size());
+    TEST_CHECK(decom::msg::get_msg_pool().max_size() == DECOM_MSG_POOL_PAGES); 
+    TEST_CHECK(decom::msg::get_msg_pool().used_pages() == 1U);
+    TEST_CHECK(decom::msg::get_msg_pool().used_pages_max() == decom::msg::get_msg_pool().max_size());
     TEST_END;
   }
 
