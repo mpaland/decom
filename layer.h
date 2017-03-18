@@ -49,13 +49,13 @@
 ///////////////////////////////////////////////////////////////////////////////
 
 // IMPL_HEADER macro for including platform specific implementations
+// usage:
+// #include IMPL_HEADER(util/timer.h)
 #define STRINGIFY(x) #x
 #define XSTRINGIFY(d) STRINGIFY(d)
 #define PATH(header, platform) XSTRINGIFY(platform ## header)
 #define IMPL(s) ./impl/s/
 #define IMPL_HEADER(header) PATH(header, IMPL(PLATFORM))
-// usage:
-//#include IMPL_HEADER(util/timer.h)
 
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -271,7 +271,7 @@ public:
 
 
   // Status indication codes from lower to upper layer
-  typedef enum enum_status_type {
+  typedef enum tag_status_type {
     connected,      // connection established, layer can be used for communication now
     disconnected,   // interface, line, post etc. gone or connection ended
     tx_done,        // data completely transmitted, next data is acceptable by lower layer
@@ -289,14 +289,16 @@ public:
    * \param code The status code which occurred on lower layer
    * \param id The endpoint identifier
    */
-  virtual void indication(status_type code, eid const& id = eid_any) { if (upper_) upper_->indication(code, id); }
+  virtual void indication(status_type code, eid const& id = eid_any)
+  { if (upper_) upper_->indication(code, id); }
 
 
   /**
    * Called during stack assembly after the registration of the upper layer
    * May be used to do additional initialization when the upper layer is known
    */
-  virtual void upper_registered() { }
+  virtual void upper_registered()
+  { }
 
 
 protected:
