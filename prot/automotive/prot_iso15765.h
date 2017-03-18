@@ -24,6 +24,8 @@
 // THE SOFTWARE.
 //
 // \brief ISO15765-2 (CAN TP) transport protocol including extended addressing
+// This protocol is often used in automotive diagnostic environment, e.g. tester
+// communication over CAN or K-Line
 //
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -32,12 +34,13 @@
 
 #include "prot.h"
 #include "util/timer.h"
-
+#include "util/util.h"
 
 /////////////////////////////////////////////////////////////////////
 
 namespace decom {
 namespace prot {
+
 
 // protocol definitions
 #define NPCI_SINGLE_FRAME           0x00U
@@ -45,6 +48,7 @@ namespace prot {
 #define NPCI_CONSECUTIVE_FRAME      0x20U
 #define NPCI_FLOW_CONTROL           0x30U
 #define NPCI_ERROR_FRAME            0x40U
+#define NPCI_INVALID                0xFFU
 
 // data frame length - normal addressing
 #define SF_DATALENGTH               7U
@@ -71,12 +75,6 @@ namespace prot {
 #define N_Bs                        1000U
 #define N_Cr                        1000U
 
-// defines the largest frame size to accept by protocol
-#define CF_MAX_FRAME_SIZE           4095U
-
-// defines the largest (consecutive) frame size to accept due to buffer limit
-#define CF_MAX_BUFFER_SIZE          CF_MAX_FRAME_SIZE
-
 // define (uncomment) this if Flow Control overflow frame should be sent, but it's uncommon
 //#define FC_SEND_OVERFLOW
 
@@ -86,6 +84,35 @@ class iso15765 : public protocol
 private:
   // disable normal layer ctor
   iso15765(decom::layer* lower);
+
+  msg           CF_frame_;            // buffer for consecutive frames
+  eid           CF_eid_;              // CF tx eid
+  util::event   CF_tx_ev_;            // CF transmit done indication
+
+  std::uint8_t  CF_SN_;               // frame sequence number
+  std::uint16_t CF_DL_;               // actual sent data length
+  std::uint16_t CF_size_;             // complete frame size
+  std::uint16_t CF_MAX_DL_;           // maximum data length
+
+  std::uint8_t  CF_STmin_;            // own STmin parameter, send to peer
+  std::uint8_t  CF_BS_;               // own BS parameter, send to peer
+  std::uint8_t  CF_BScnt_;            // own BS counter, internal
+
+  std::uint8_t  FC_STmin_;            // STmin parameter, received by FC frame
+  std::uint8_t  FC_BS_;               // BS parameter, received by FC frame
+  std::uint8_t  FC_FS_;               // FS parameter, received by FC frame
+
+  std::uint8_t  tx_frame_;            // frame type sent
+
+  bool          use_ext_adr_;         // use extended addressing
+  bool          use_zero_padding_;    // use zero padding
+  std::uint8_t  ext_source_adr_;      // extended addressing source address
+  std::uint8_t  ext_target_adr_;      // Extended addressing target address
+
+  util::timer timer_TX_CF_;           // TX CF timer
+  util::timer timer_TX_FC_;           // TX FC timer
+  util::timer timer_RX_CF_;           // RX CF timer
+
 
 public:
   /**
@@ -100,22 +127,19 @@ public:
     , CF_STmin_(STmin)
     , CF_BS_(BS)
     , CF_MAX_DL_(MAX_DL)
-  {
-    CF_DL_            = 0U;
-    CF_SN_            = 0U;
-    CF_size_          = 0U;
-    CF_BScnt_         = 0U;
-
-    FC_STmin_         = 0U;
-    FC_BS_            = 0U;
-    FC_FS_            = 0U;
-
-    ext_source_adr_   = 0U;
-    ext_target_adr_   = 0U;
-
-    use_ext_adr_      = false;
-    use_zero_padding_ = false;
-  }
+    , CF_DL_(0U)
+    , CF_SN_(0U)
+    , CF_size_(0U)
+    , CF_BScnt_(0U)
+    , FC_STmin_(0U)
+    , FC_BS_(0U)
+    , FC_FS_(0U)
+    , ext_source_adr_(0U)
+    , ext_target_adr_(0U)
+    , tx_frame_(NPCI_INVALID)
+    , use_ext_adr_(false)
+    , use_zero_padding_(false)
+  { }
 
 
   /**
@@ -131,7 +155,7 @@ public:
    * \param channel The channel to open
    * \return true if open is successful
    */
-  virtual bool open(const char* address = "", decom::eid const& id = eid_any)
+  virtual bool open(const char* address = "", eid const& id = eid_any)
   {
     // for security: check that upper protocol/device exists
     if (!upper_) {
@@ -143,8 +167,8 @@ public:
     // if opening the lower layer fails, report it to upper layer
     bool result = protocol::open(address, id);
 
-    // open/init THIS layer HERE
-    CF_DL_ = 0U;
+    // init this layer
+    tx_frame_ = NPCI_INVALID;
 
     return result;
   }
@@ -154,7 +178,7 @@ public:
    * Called by upper layer to close this layer
    * \param channel The channel to close
    */
-  virtual void close(decom::eid const& id = eid_any)
+  virtual void close(eid const& id = eid_any)
   {
     // FIRST close THIS layer HERE
     timer_TX_CF_.stop();
@@ -175,46 +199,49 @@ public:
    * \param more true if message is a fragment which is followed by another msg. False if no/last fragment
    * \return true if Send is successful
    */
-  virtual bool send(decom::msg& data, decom::eid const& id = eid_any, bool more = false)
+  virtual bool send(msg& data, eid const& id = eid_any, bool more = false)
   {
     (void)more;
 
-    if (data.size() > CF_MAX_FRAME_SIZE) {    // TP protocol can handle max 4095 bytes
+    if (data.size() > CF_MAX_DL_) {    // TP protocol can handle max 4095 bytes
       // data size too big
-      DECOM_LOG_ERROR("msg too big (> 4095 bytes)");
+      DECOM_LOG_ERROR("msg too big (data > 4095 bytes)");
       return false;
     }
 
     // is a msg transmission already in progress?
-    if (CF_DL_ != 0U) {
+    if (tx_frame_ != NPCI_INVALID) {
       // should not happen - did you wait for tx_done ?
-      DECOM_LOG_ERROR("TX already in progress");
+      DECOM_LOG_ERROR("TX already in progress - did you wait for tx_done?");
       return false;
     }
 
+
     if (data.size() <= (use_ext_adr_ ? SF_DATALENGTH_EXT : SF_DATALENGTH)) {
       // send SF
+
       data.push_front(NPCI_SINGLE_FRAME | (data.size() & 0x0FU));
       if (use_ext_adr_) {
         data.push_front(ext_target_adr_);
       }
       if (use_zero_padding_) {
-        data.insert(data.end(), data.size() < FRAME_LENGTH ? FRAME_LENGTH - data.size() : 0, (std::uint8_t)0);
+        data.insert(data.end(), data.size() < FRAME_LENGTH ? FRAME_LENGTH - data.size() : 0U, (std::uint8_t)0U);
       }
+      
+      tx_frame_ = NPCI_SINGLE_FRAME;
       return protocol::send(data, id);
     }
     else {
       // send FF
 
-      CF_frame_ = data;   // store a cheap copy
-
-      decom::msg ff;
+      CF_frame_.ref_copy(data);                                         // store a cheap copy
       CF_SN_    = 1U;                                                   // init sequence number
       CF_DL_    = (use_ext_adr_ ? FF_DATALENGTH_EXT : FF_DATALENGTH);   // init FF data length
       CF_size_  = (std::uint16_t)data.size();                           // set frame size
       CF_BScnt_ = 0U;                                                   // init block counter
       CF_eid_   = id;                                                   // tx eid
 
+      msg ff;
       ff.push_back(NPCI_FIRST_FRAME | ((CF_size_ >> 8U) & 0x0FU));
       ff.push_back((std::uint8_t)(CF_size_));
       ff.insert(ff.end(), data.begin(), data.begin() + CF_DL_);
@@ -222,16 +249,17 @@ public:
         ff.push_front(ext_target_adr_);
       }
 
-      if (protocol::send(ff, id)) {
+      tx_frame_ = NPCI_FIRST_FRAME;
+      if (protocol::send(ff, CF_eid_)) {
         // sending to lower lower layer was successful
         // start timer for FC reception check
-        timer_TX_FC_.start(std::chrono::milliseconds(N_Bs), false, &iso15765::timer_func_TX_FC, this);
+        timer_TX_FC_.start(std::chrono::milliseconds(N_Bs), false, &timer_func_TX_FC, this);
         return true;
       }
       else {
         // FF could not be send - abort
+        CF_frame_.clear();    // release copy
         CF_DL_ = 0U;
-        CF_frame_.clear();
         return false;
       }
     }
@@ -244,7 +272,7 @@ public:
    * \param id The endpoint identifier
    * \param more true if message is a fragment which is followed by another msg. False if no/last fragment
    */
-  virtual void receive(decom::msg& data, decom::eid const& id = eid_any, bool more = false)
+  virtual void receive(msg& data, eid const& id = eid_any, bool more = false)
   {
     (void)more;
 
@@ -280,18 +308,19 @@ public:
       case NPCI_FIRST_FRAME :
       {
         // first frame received
-        CF_DL_ = decom::util::make_large<std::uint8_t, std::uint16_t>(data[1], data[0] & 0x0FU);
+        CF_DL_ = util::make_large<std::uint8_t, std::uint16_t>(data[1], data[0] & 0x0FU);
         if ((CF_DL_ < (use_ext_adr_ ? FF_DATALENGTH_EXT : FF_DATALENGTH) + 2U)) {
           // error - frame length too small, discard frame
-          CF_DL_ = 0U;
           CF_frame_.clear();
+          CF_DL_ = 0U;
           protocol::indication(rx_error, id);
           break;
         }
-        if (CF_DL_ > CF_MAX_DL_ || CF_DL_ > CF_MAX_BUFFER_SIZE) {
+        if (CF_DL_ > CF_MAX_DL_) {
           // error - frame too big, discard frame
-          CF_DL_ = 0U;
+          DECOM_LOG_WARN("FF frame discarded, size too big: ") << CF_DL_;
           CF_frame_.clear();
+          CF_DL_ = 0U;
           #if defined(FC_SEND_OVERFLOW)
             // send FC
             send_FC(FC_OVERFLOW, id);
@@ -300,11 +329,13 @@ public:
           break;
         }
 
+        DECOM_LOG_DEBUG("FF frame received, size: ") << CF_DL_;
+
         // frame is okay
         data.pop_front();     // strip NPCI
         data.pop_front();
         data.resize(use_ext_adr_ ? FF_DATALENGTH_EXT : FF_DATALENGTH);  // resize to actual data length
-        CF_frame_.copy(data); // init buffer
+        CF_frame_ = data;     // init buffer
         CF_SN_    = 1U;       // init SN (next expected seq number)
         CF_BScnt_ = 0U;       // init block counter
 
@@ -332,11 +363,17 @@ public:
         // check sequence number
         std::uint8_t SN = data[0] & 0x0FU;
         if (SN != CF_SN_) {
-          // error - wrong sequence number, discard frame and cancel reception
-          CF_DL_ = 0U;
-          CF_frame_.clear();
-          protocol::indication(rx_error, id);
-          break;
+// TBD
+          if ((SN != CF_SN_ - 1U) || ((SN == 0x0FU) && (CF_SN_== 0x00U))) {  // <--- this...  may happen
+            break;
+          }
+          else {
+            // error - wrong sequence number, discard frame and cancel reception
+            CF_DL_ = 0U;
+            CF_frame_.clear();
+            protocol::indication(rx_error, id);
+            break;
+          }
         }
         else {
           // generate next SN
@@ -346,23 +383,16 @@ public:
         // frame is okay
         data.pop_front();     // strip NPCI
 
-        // check buffer space
-        if (CF_frame_.size() + data.size() <= CF_MAX_BUFFER_SIZE) {
-          // append new data to buffer, don't use CF_frame_.append() here, because data is really small
-          CF_frame_.insert(CF_frame_.end(), data.begin(), data.end());
-        }
-        else {
-          // the CF is accepted, but silently discarded but the upper layer gets informed
-          protocol::indication(rx_overrun, id);
-        }
+        // append new data to buffer, don't use CF_frame_.append() here, because data is really small
+        CF_frame_.insert(CF_frame_.end(), data.begin(), data.end());
 
         // frame done?
         if (CF_frame_.size() >= CF_DL_) {
           // frame complete - send frame to upper layer
           CF_frame_.resize(CF_DL_);
           protocol::receive(CF_frame_, id);
-          CF_DL_ = 0U;
           CF_frame_.clear();
+          CF_DL_ = 0U;
           break;
         }
 
@@ -374,7 +404,6 @@ public:
 
         // restart timer
         timer_RX_CF_.start(std::chrono::milliseconds(N_Cr), false, &iso15765::timer_func_RX_CF, this);
-
         break;
       }
 
@@ -396,6 +425,8 @@ public:
           break;
         }
 
+        DECOM_LOG_DEBUG("FC frame received");
+
         // frame is okay - store values
         FC_FS_    = data[0] & 0x01U;    // 0 = CTS (ContinueToSend), 1 = WT (Wait)
         FC_BS_    = data[1];
@@ -404,9 +435,8 @@ public:
 
         if (FC_FS_ == 0U) {
           // CTS set - send next consecutive frame
-          timer_TX_CF_.start(std::chrono::milliseconds(FC_STmin_), false, &iso15765::timer_func_TX_CF, this);
+          timer_TX_CF_.start(std::chrono::milliseconds(FC_STmin_), false, &timer_func_TX_CF, this);
         }
-
         break;
       }
 
@@ -417,6 +447,7 @@ public:
     }
   }
 
+
   /**
    * Status/Error indication from lower layer
    * \param code The error code which occurred on lower layer
@@ -424,12 +455,35 @@ public:
    */
   virtual void indication(status_type code, decom::eid const& id = eid_any)
   {
-    if (code == tx_done) {
-      // message sent, process next segment
-      tx_ev_.set();
-    }
+    switch (code)
+    {
+      case connected :
+      case disconnected :
+        protocol::indication(code, id);
+        break;
 
-    protocol::indication(code, id);
+      case tx_done :
+        switch (tx_frame_)
+        {
+          case NPCI_SINGLE_FRAME :
+            protocol::indication(code, id);
+            break;
+          case NPCI_CONSECUTIVE_FRAME :
+            if (confirm_CF()) {
+              protocol::indication(code, id);
+            }
+            break;
+          default :
+            break;
+        }
+        tx_frame_ = NPCI_INVALID;
+        break;
+
+      default :
+        // don't pass any com errors from lower layer
+        tx_frame_ = NPCI_INVALID;
+        break;
+    }
   }
 
 ////////////////////////////////////////////////////////////////////////
@@ -440,7 +494,7 @@ public:
    * \param source_adr Source address, the first byte of a received msg is checked against this byte
    * \param target_adr Target address, used as first byte in a transmitted message
    */
-  void extended_addressing(bool use_extended, std::uint8_t source_adr, std::uint8_t target_adr)
+  void set_extended_addressing(bool use_extended, std::uint8_t source_adr, std::uint8_t target_adr)
   {
     use_ext_adr_    = use_extended;
     ext_source_adr_ = source_adr;
@@ -449,17 +503,49 @@ public:
 
 
   /**
-   * Zero padding usage
-   * set this to true to use zero padding. All messages with length < 8 are padded with zeros to length of 8
+   * Zero padding setup
+   * \param use_zero_padding true to activate zero padding, false to deactivate it
    */
-  bool use_zero_padding_;
+  void set_zero_padding(bool use_zero_padding)
+  {
+    use_zero_padding_ = use_zero_padding;
+  }
 
 
 private:
-  bool send_CF()
-  {
-    decom::msg cf;
 
+  bool confirm_CF()
+  {
+    CF_SN_++;
+    CF_DL_ += (use_ext_adr_ ? CF_DATALENGTH_EXT : CF_DATALENGTH);
+
+    // check if frame is complete
+    if (CF_DL_ >= CF_size_) {
+      // frame completely sent
+      CF_frame_.clear();
+      CF_DL_ = 0U;
+      return true;
+    }
+
+    // check BS
+    if (FC_BS_ && (CF_BScnt_++ >= FC_BS_)) {
+      // block completely sent - wait for FC from receiver
+
+      // trigger timer for next FC reception
+      timer_TX_FC_.start(std::chrono::milliseconds(N_Bs), false, &timer_func_TX_FC, this);
+    }
+    else {
+      // trigger timer for next CF frame
+      timer_TX_CF_.start(std::chrono::milliseconds(FC_STmin_), false, &timer_func_TX_CF, this);
+    }
+  
+    return false;   // CF transmission still in progress
+  }
+
+
+  void send_CF()
+  {
+    msg cf;
     cf.push_back(NPCI_CONSECUTIVE_FRAME | (CF_SN_ & 0x0FU));
     cf.insert(cf.end(), CF_frame_.begin() + CF_DL_, (CF_DL_ + (use_ext_adr_ ? CF_DATALENGTH_EXT : CF_DATALENGTH) < CF_frame_.size()) ? CF_frame_.begin() + CF_DL_ + (use_ext_adr_ ? CF_DATALENGTH_EXT : CF_DATALENGTH) : CF_frame_.end());
     if (use_ext_adr_) {
@@ -469,78 +555,43 @@ private:
       cf.insert(cf.end(), cf.size() < FRAME_LENGTH ? FRAME_LENGTH - cf.size() : 0,  (std::uint8_t)0);
     }
 
-    // wait for tx_done
-    if (tx_ev_.wait_for(std::chrono::milliseconds(N_As)) != std::cv_status::no_timeout) {
-      // timeout - abort frame transmission
-      CF_DL_ = 0U;
-      CF_frame_.clear();
-      DECOM_LOG_ERROR("Frame tx aborted");
-      protocol::indication(tx_timeout);   // inform upper layer
-      return false;
-    }
-    tx_ev_.reset();
-
+    tx_frame_ = NPCI_CONSECUTIVE_FRAME;
     if (protocol::send(cf, CF_eid_)) {
       // sending to lower layer was successful
-
-      CF_SN_++;
-      CF_DL_ += (use_ext_adr_ ? CF_DATALENGTH_EXT : CF_DATALENGTH);
-
-      // check if frame is complete
-      if (CF_DL_ >= CF_size_) {
-        // frame completely sent
-        CF_DL_ = 0U;
-        CF_frame_.clear();
-        return true;
-      }
-
-      // check BS
-      if (FC_BS_ && (CF_BScnt_++ >= FC_BS_)) {
-        // block completely sent - wait for FC from receiver
-
-        // trigger timer for next FC reception
-        timer_TX_FC_.start(std::chrono::milliseconds(N_Bs), false, &iso15765::timer_func_TX_FC, this);
-      }
-      else {
-        // trigger timer for next CF frame
-        timer_TX_CF_.start(std::chrono::milliseconds(FC_STmin_), false, &iso15765::timer_func_TX_CF, this);
-      }
-
-      return true;
+      return;
     }
     else {
       // transmission error on lower layer - two strategies here:
       // 1. restart STmin timer to try again (lower layer e.g. CAN may be busy)
       // 2. abort frame transmission
-    #if(1)
+    #if (0)
       // retrigger timer for next CF frame
-      timer_TX_CF_.start(std::chrono::milliseconds(FC_STmin_), false, &iso15765::timer_func_TX_CF, this);
+      timer_TX_CF_.start(std::chrono::milliseconds(FC_STmin_), false, &timer_func_TX_CF, this);
     #else
       // abort frame transmission
-      CF_DL_ = 0U;
       CF_frame_.clear();
+      CF_DL_ = 0U;
       protocol::indication(tx_error);   // inform upper layer
     #endif
-      return false;
+      return;
     }
   }
 
 
-  void iso15765::send_CF_abort()
+  void send_CF_abort()
   {
-    CF_DL_ = 0U;
-    CF_frame_.clear();
     DECOM_LOG_NOTICE("CF frame abort");
+    CF_frame_.clear();
+    CF_DL_ = 0U;
 
     // inform upper layer
     protocol::indication(rx_timeout);
   }
 
 
-  bool iso15765::send_FC(std::uint8_t FS, decom::eid const& id)
+  bool send_FC(std::uint8_t FS, decom::eid const& id)
   {
-    decom::msg fc;
-
+    msg fc;
     fc.push_back(NPCI_FLOW_CONTROL | (FS & 0x0FU));
     fc.push_back(CF_BS_);
     fc.push_back(CF_STmin_);
@@ -551,28 +602,9 @@ private:
       fc.insert(fc.end(), fc.size() < FRAME_LENGTH ? FRAME_LENGTH - fc.size() : 0, (std::uint8_t)0);
     }
 
+    tx_frame_ = NPCI_FLOW_CONTROL;
     return protocol::send(fc, id);
   }
-
-
-  decom::msg    CF_frame_;                  // buffer for consecutive frames
-  decom::eid    CF_eid_;                    // CF tx eid
-  std::uint8_t  CF_SN_;                     // frame sequence number
-  std::uint16_t CF_DL_;                     // actual sent data length
-  std::uint16_t CF_size_;                   // complete frame size
-  std::uint16_t CF_MAX_DL_;                 // maximum data length
-
-  std::uint8_t CF_STmin_;                   // own STmin parameter, send to peer
-  std::uint8_t CF_BS_;                      // own BS parameter, send to peer
-  std::uint8_t CF_BScnt_;                   // own BS counter, internal
-
-  std::uint8_t FC_STmin_;                   // STmin parameter, received by FC frame
-  std::uint8_t FC_BS_;                      // BS parameter, received by FC frame
-  std::uint8_t FC_FS_;                      // FS parameter, received by FC frame
-
-  bool         use_ext_adr_;                // use extended addressing
-  std::uint8_t ext_source_adr_;             // extended addressing source address
-  std::uint8_t ext_target_adr_;             // Extended addressing target address
 
 
   // timer
@@ -598,11 +630,6 @@ private:
     // the upper layer needs to be informed that the sender has a timeout
     ((iso15765*)arg)->send_CF_abort();
   }
-
-  util::timer timer_TX_CF_;                 // TX CF timer
-  util::timer timer_TX_FC_;                 // TX FC timer
-  util::timer timer_RX_CF_;                 // RX CF timer
-  util::event tx_ev_;                       // transmit done indication
 };
 
 } // namespace prot
