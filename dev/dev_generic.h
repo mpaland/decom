@@ -115,7 +115,7 @@ public:
     }
 
     if (id != eid_ && !id.is_any()) {
-      // msg not for us, ignore
+      // msg not for us, ignore it
       return;
     }
 
@@ -129,7 +129,7 @@ public:
     }
     else {
       // copy data (cheap copy)
-      rx_msg_ = data;
+      rx_msg_.ref_copy(data);
     }
     last_more = more;
     if (!more) {
@@ -200,7 +200,7 @@ public:
    * \param blocking if true write() blocks until data is send or an error/timeout happened
    * \return true if write was successful
    */
-  bool write(msg& data, eid const& id = eid_any, bool more = false, bool blocking = false)
+  bool write(msg& data, eid const& id = eid_any, bool more = false, bool blocking = true)
   {
     // checks
     if (!is_open_) {
@@ -242,7 +242,7 @@ public:
    * \return true if write was successful
    */
   template<typename Container>
-  bool write(Container const& data, eid const& id = eid_any, bool more = false, bool blocking = false)
+  bool write(Container const& data, eid const& id = eid_any, bool more = false, bool blocking = true)
   {
     msg buf(data.begin(), data.end());
     return write(buf, id, more, blocking);
@@ -257,7 +257,7 @@ public:
    * \return true if write was successful
    */
   template<typename Iterator>
-  bool write(Iterator first, Iterator last, eid const& id = eid_any, bool more = false, bool blocking = false)
+  bool write(Iterator first, Iterator last, eid const& id = eid_any, bool more = false, bool blocking = true)
   {
     msg buf(first, last);
     return write(buf, id, more, blocking);
@@ -270,7 +270,7 @@ public:
    * \param id The endpoint identifier
    * \return true if write was successful
    */
-  bool write(const char* data, eid const& id = eid_any, bool more = false, bool blocking = false)
+  bool write(const char* data, eid const& id = eid_any, bool more = false, bool blocking = true)
   {
     msg buf;
     buf.put((std::uint8_t*)data, ::strlen(data));
@@ -284,7 +284,7 @@ public:
    * \param id The endpoint identifier
    * \return true if write was successful
    */
-  bool write(std::uint8_t data, eid const& id = eid_any, bool more = false, bool blocking = false)
+  bool write(std::uint8_t data, eid const& id = eid_any, bool more = false, bool blocking = true)
   {
     msg buf;
     buf.push_back(data);
@@ -298,7 +298,7 @@ public:
    * \param id The endpoint identifier
    * \return true if write was successful
    */
-  bool write(const std::uint8_t* data, std::size_t count, eid const& id = eid_any, bool more = false, bool blocking = false)
+  bool write(const std::uint8_t* data, std::size_t count, eid const& id = eid_any, bool more = false, bool blocking = true)
   {
     msg buf;
     buf.put(data, count);
