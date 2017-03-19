@@ -6,7 +6,8 @@ This is the decom (**DE**vice **COM**munication) library.
 decom is a universal, cross platform, NON BLOCKING, high performance c++ communication library.
 It is intended to be a minimalistic abstraction of the OSI layer model.
 
-### Design goals:
+
+## Design goals:
 - CLEAN code without any warnings on highest compiler level (4), LINT checked
 - Production/industrial/automotive code quality
 - Cross platform and embedded support
@@ -22,13 +23,14 @@ In the moment, some decom classes use STL containers like `<vector>`.
 On embedded systems special STL libs like "ustl" may be used.
 In later versions, any usage of STL containers should be avoided due to dynamic memory management, which makes decom not suitable for automotive and small embedded applications.
 
+
 ## Class overview
 The following layer classification is used:
 
-![](doc/layer.svg)
+![](https://cdn.rawgit.com/mpaland/decom/master/doc/layer.svg)
 
-The decom stack consists of exactly one com (communicator), one dev (device) and any number of prots (protocols).  
-Interaction between the layers is done by the following 5 functions:
+The decom stack consists of exactly one `com` (communicator), one `dev` (device) and any number of `prot`s (protocols).  
+Interaction between the layers is done by the following 5 decom standard interface functions:
 
 - `open()`
   Open this layer to send/receive data.
@@ -37,12 +39,13 @@ Interaction between the layers is done by the following 5 functions:
 - `send()`
   Called by the upper layer to send data to this layer.
 - `receive()`
-  Called by lower layer to pass received data to this layer.
+  Called by the lower layer to pass received data to this layer.
 - `indication()`
-  Called by lower layer to indicate a status code/condition to this layer.
+  Called by the lower layer to indicate a status/error condition to this layer.
 
 These functions MUST be implemented by every layer.
- Each layer can have further specific API functions to set layer specific protocol params like baudrate, timings, flow control etc. e.g. and can have a special param ctor(s).
+Each layer can have further specific API functions to set layer specific protocol params like baudrate, timings, flow control etc. e.g. and can have a special param ctor(s).  
+Why is there only one indication function in device direction? An indication function in com direction is not necessary because in many protocols incoming data can't be controlled or throtteled. The upper layers just have to deal with this and can't say the network to slow down or halt. 
 
 
 ### Device layer
@@ -63,8 +66,10 @@ This is the lowest OSI layer (2). It has only one interface to an upper layer an
 This layer is arcitecture dependent.
 The namespace for communicators is `decom::com`.
 
-### Mandatory layer functions
-Each layer consists of the decom standard interface routines (defined in 'layer.h') to pass and receive data from the upper and lower layer. These are:
+
+### msg class
+decom stores all communication data in a special `msg` class. The `msg` class itself stores data in one or more pages, provided by a static msg pool.
+The `msg` class has all functions and iterators of a normal STL container class. It's very similar to the 'deque' container, but has some major advantages like static memory management, data copies by reference counting etc.
 
 
 ## Stack creation
