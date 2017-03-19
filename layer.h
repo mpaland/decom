@@ -128,6 +128,15 @@ struct eid
   { return !(*this == other); }
 
 
+  inline bool operator<(eid const& other) const
+  {
+    return (port_ < other.port())                 &&
+      ((addr_.addr64[1] < other.addr().addr64[1]) ||
+       (addr_.addr64[1] == other.addr().addr64[1] && addr_.addr64[0] < other.addr().addr64[0])
+      );
+  }
+
+
 private:
   addr_type     addr_;
   std::uint32_t port_;
