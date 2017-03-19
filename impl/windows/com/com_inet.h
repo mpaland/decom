@@ -27,6 +27,7 @@
 //
 // This class is used for client or server TCP or UDP connections over IP
 // The Winsock2 API is used.
+// You have to link against "Ws2_32.lib"
 //
 // TCP server (multi connections):
 // com_inet (true, true)
