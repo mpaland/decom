@@ -376,8 +376,8 @@ public:
   }
 
 
-  // copy ctor - This ctor generates a cheap copy (ref copy), not a physical second msg.
-  // if a physical copy is needed use the copy() function
+  // copy ctor - This ctor generates a deep (full) copy of the given msg, like
+  // the assignment operator
   msg(const msg& m)
     : illegal_ref_(0xCCU)                 // init illegal ref
     , name_("msg")
@@ -398,13 +398,6 @@ public:
         }
       }
     }
-/*
-    page_ = m.page_;
-    // inc all page references
-    for (msg_pool::pointer p = page_; p; p = p->next) {
-      p->ref++;
-    }
-*/
   }
 
 
@@ -442,7 +435,9 @@ public:
   }
 
 
-  // make a cheap copy (inc page references)
+  // Generates a cheap copy (ref copy), not a physical second msg.
+  // The ref counters of all pages are incremented. Both messages
+  // (original and copy) are read only then!
   msg& ref_copy(const msg& m)
   {
     // free old pages
