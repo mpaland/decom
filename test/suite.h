@@ -10,8 +10,8 @@
 #include "test_msg.h"
 #include "test_prot_intel_hex.h"
 #include "test_prot_iso15765.h"
-#include "test_prot_zvt.h"
-#include "test_prot_scheduler.h"
+//#include "test_prot_zvt.h"
+//#include "test_prot_scheduler.h"
 #include "test_com_inet.h"
 ///////////////////////////////////////////////////////////
 
@@ -40,8 +40,8 @@ public:
    * Filename ctor
    */
   suite(const char* filename, format_type format = text)
-   : filename_(filename)
-   , format_(format)
+    : filename_(filename)
+    , format_(format)
   {
     // init result file
     std::ofstream of;
@@ -54,6 +54,7 @@ public:
 
     of.close();
   }
+
 
   /*
    * Stream ctor

@@ -4,9 +4,10 @@
 #include "decom_cfg.h"
 #include "test.h"
 
-#include "../prot/prot_intel_hex.h"
-#include "../com/com_generic.h"
-#include "../dev/dev_generic.h"
+#include "prot/prot_intel_hex.h"
+#include "com/com_generic.h"
+#include "dev/dev_generic.h"
+
 
 namespace decom {
 namespace test {
@@ -16,10 +17,11 @@ class prot_intel_hex : public test
   // TEST CASES
 public:
   prot_intel_hex(std::ostream& result_file, format_type format)
-   : test("prot_intel_hex", result_file, format)
+    : test("prot_intel_hex", result_file, format)
   {
     test1();
   }
+
 
 protected:
 

@@ -8,6 +8,7 @@
 
 //#include "...."   // include further modules
 
+
 namespace decom {
 namespace test {
 
@@ -16,7 +17,7 @@ class skeleton : public test
   // TEST CASES
 public:
   skeleton(std::ostream& result_file, format_type format)
-   : test("skeleton", result_file, format)
+    : test("skeleton", result_file, format)
   {
     test_case1();
     test_case2();

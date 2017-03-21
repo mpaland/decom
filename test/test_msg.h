@@ -4,7 +4,8 @@
 #include "decom_cfg.h"
 
 #include "test.h"
-#include "../msg.h"
+#include "msg.h"
+
 
 namespace decom {
 namespace test {
@@ -14,7 +15,7 @@ class msg : public test
   // TEST CASES
 public:
   msg(std::ostream& result_file, format_type format)
-   : test("msg", result_file, format)
+    : test("msg", result_file, format)
   {
     generic();
     capacity();

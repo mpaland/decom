@@ -4,9 +4,9 @@
 #include "decom_cfg.h"
 #include "test.h"
 
-#include "../com/com_inet.h"
-#include "../dev/dev_generic.h"
-#include "../dev/dev_echo.h"
+#include "com/com_inet.h"
+#include "dev/dev_generic.h"
+#include "dev/dev_echo.h"
 
 
 namespace decom {

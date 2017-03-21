@@ -5,9 +5,10 @@
 
 #include "test.h"
 
-#include "../ext/ZVT/prot_zvt.h"
-#include "../com/com_generic.h"
-#include "../dev/dev_generic.h"
+#include "ext/ZVT/prot_zvt.h"
+#include "com/com_generic.h"
+#include "dev/dev_generic.h"
+
 
 namespace decom {
 namespace test {

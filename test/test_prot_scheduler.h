@@ -4,10 +4,10 @@
 #include "decom_cfg.h"
 #include "test.h"
 
-#include "../prot/prot_scheduler.h"
-#include "../prot/prot_debug.h"
-#include "../com/com_null.h"
-#include "../dev/dev_generic.h"
+#include "prot/prot_scheduler.h"
+#include "prot/prot_debug.h"
+#include "com/com_null.h"
+#include "dev/dev_generic.h"
 
 
 namespace decom {
@@ -18,7 +18,7 @@ class prot_scheduler : public test
   // TEST CASES
 public:
   prot_scheduler(std::ostream& result_file, format_type format)
-   : test("prot_scheduler", result_file, format)
+    : test("prot_scheduler", result_file, format)
   {
     test1();
   }

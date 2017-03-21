@@ -5,11 +5,12 @@
 
 #include "test.h"
 
-#include "../prot/automotive/prot_iso15765.h"
-#include "../prot/prot_debug.h"
-#include "../com/com_generic.h"
-#include "../com/com_loopback.h"
-#include "../dev/dev_generic.h"
+#include "prot/automotive/prot_iso15765.h"
+#include "prot/prot_debug.h"
+#include "com/com_generic.h"
+#include "com/com_loopback.h"
+#include "dev/dev_generic.h"
+
 
 namespace decom {
 namespace test {
@@ -20,12 +21,13 @@ class prot_iso15765 : public test
   // TEST CASES
 public:
   prot_iso15765(std::ostream& result_file, format_type format)
-   : test("iso15765", result_file, format)
+    : test("iso15765", result_file, format)
   {
     SFtest();
     CFtest();
     looptest();
   }
+
 
 protected:
 
