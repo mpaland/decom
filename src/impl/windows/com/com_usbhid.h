@@ -667,27 +667,30 @@ private:
 
         case WAIT_OBJECT_0 + ev_transmit :
           // tx event
-          if (::GetOverlappedResult(u->device_handle_, &u->tx_overlapped_, &bytes_written, FALSE) && bytes_written) {
+          BOOL res = ::GetOverlappedResult(u->device_handle_, &u->tx_overlapped_, &bytes_written, FALSE) && bytes_written);
+          (void)::ResetEvent(u->events_[ev_transmit]);    // manual reset event
+          if (res) {
             // okay - byte written, any more data segments to send
             if (u->tx_offset_ < u->tx_msg_.size()) {
               // send next segment
               if (!u->send_segment()) {
                 // serious error - inform upper layer
+                u->tx_busy_ = false;
                 u->communicator::indication(tx_error, u->tx_eid_);
               }
             }
             else {
               // data complete, inform upper layer
+              u->tx_busy_ = false;
               u->communicator::indication(tx_done, u->tx_eid_);
             }
           }
           else {
             // error - bytes not written
             // discard any outstanding send data
+            u->tx_busy_ = false;
             u->communicator::indication(tx_error, u->tx_eid_);
           }
-          (void)::ResetEvent(u->events_[ev_transmit]);    // manual reset event
-          u->tx_busy_ = false;
           break;
 
         case WAIT_OBJECT_0 + usbhid::ev_receive :
