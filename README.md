@@ -27,7 +27,7 @@ In later versions, any usage of STL containers should be avoided due to dynamic 
 ## Class overview
 The following layer classification is used:
 
-![](https://cdn.rawgit.com/mpaland/decom/master/doc/layer.svg)
+![](https://cdn.rawgit.com/mpaland/decom/master/docs/layer.svg)
 
 The decom stack consists of exactly one `com` (communicator), one `dev` (device) and any number of `prot`s (protocols).  
 Interaction between the layers is done by the following 5 decom standard interface functions:
