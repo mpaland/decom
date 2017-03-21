@@ -535,7 +535,7 @@ public:
   {
     inet* i = static_cast<inet*>(arg);
 
-    for(;;) {
+    for (;;) {
       DWORD bytes_transferred = 0U;
       OVERLAPPED* overlapped;
       client_context_type* client_context;
