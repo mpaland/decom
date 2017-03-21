@@ -125,7 +125,7 @@
 // disable for MS release
 #if defined(_MSC_VER) && !defined(_DEBUG)
 #undef DECOM_LOG_LEVEL
-#define DECOM_LOG_LEVEL_NONE
+#define DECOM_LOG_LEVEL   DECOM_LOG_LEVEL_NONE
 #endif
 
 
