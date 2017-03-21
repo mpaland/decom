@@ -476,16 +476,10 @@ private:
 
         case WAIT_OBJECT_0 + ev_transmit :
           // tx event
-          if (::GetOverlappedResult(s->com_handle_, &s->tx_overlapped_, &bytes_written, FALSE) && bytes_written) {
-            // okay - bytes written, inform upper layer
-            s->communicator::indication(tx_done);
-          }
-          else {
-            // error - bytes not written
-            s->communicator::indication(tx_error);
-          }
-          (void)::ResetEvent(s->events_[ev_transmit]);    // manual reset event
+          BOOL res = ::GetOverlappedResult(s->com_handle_, &s->tx_overlapped_, &bytes_written, FALSE) && bytes_written);
+          (void)::ResetEvent(s->events_[ev_transmit]);              // manual reset event
           s->tx_busy_ = false;
+          s->communicator::indication(res ? tx_done : tx_error);    // inform upper layer
           break;
 
         case WAIT_OBJECT_0 + ev_receive :
@@ -495,7 +489,7 @@ private:
             msg data(s->rx_buf_, s->rx_buf_ + bytes_read);
             s->communicator::receive(data);
           }
-          (void)::ResetEvent(s->events_[ev_receive]);     // manual reset event
+          (void)::ResetEvent(s->events_[ev_receive]);               // manual reset event
           s->rx_busy_ = false;
           break;
 
