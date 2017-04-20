@@ -202,7 +202,7 @@ private:
     std::chrono::milliseconds elapsed;                // elapsed time since last transmission
   } message_type;
 
-  std::map<decom::eid, message_type>      messages_;  // map which contains all messages
+  std::map<eid, message_type>             messages_;  // map which contains all messages
   std::vector<std::vector<decom::eid> >   tables_;    // vector of all tables
   std::vector<std::vector<std::int32_t> > lists_;     // vector of all lists
 

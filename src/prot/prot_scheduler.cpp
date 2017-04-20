@@ -294,8 +294,7 @@ void scheduler::timer_callback(void* arg)
     if (it != s->messages_.end()) {
       // msg found, get data
       s->msg_mutex_.lock();
-      decom::msg data;
-      data.copy(it->second.data);   // data may be clothed on lower layer, so use a real copy here
+      decom::msg data = it->second.data;   // data may be clothed on lower layer, so use a real copy here
       s->msg_mutex_.unlock();
       s->protocol::send(data, it->first);
       if (s->callback_) {           // callback
@@ -311,8 +310,7 @@ void scheduler::timer_callback(void* arg)
       if (it->second.elapsed >= it->second.interval) {
         it->second.elapsed = std::chrono::milliseconds(0);
         s->msg_mutex_.lock();
-        decom::msg data;
-        data.copy(it->second.data);   // data may be clothed on lower layer, so use a real copy here
+        decom::msg data = it->second.data;    // data may be clothed on lower layer, so use a real copy here
         s->msg_mutex_.unlock();
         s->protocol::send(data, it->first);
       }
