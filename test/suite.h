@@ -22,7 +22,7 @@ namespace test {
 class suite
 {
 private:
-  /*
+  /**
    * Test list - list all modules to test here
    */
   void test_modules()
@@ -36,7 +36,7 @@ private:
   }
 
 public:
-  /*
+  /**
    * Filename ctor
    */
   suite(const char* filename, format_type format = text)
@@ -56,7 +56,7 @@ public:
   }
 
 
-  /*
+  /**
    * Stream ctor
    */
   suite(std::ostream& result_stream, format_type format = text)
@@ -69,7 +69,7 @@ public:
   }
 
 
-  /*
+  /**
    * dtor
    */
   ~suite()
