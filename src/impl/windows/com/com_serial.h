@@ -476,10 +476,12 @@ private:
 
         case WAIT_OBJECT_0 + ev_transmit :
           // tx event
-          BOOL res = ::GetOverlappedResult(s->com_handle_, &s->tx_overlapped_, &bytes_written, FALSE) && bytes_written);
+          {
+            BOOL res = ::GetOverlappedResult(s->com_handle_, &s->tx_overlapped_, &bytes_written, FALSE) && bytes_written;
           (void)::ResetEvent(s->events_[ev_transmit]);              // manual reset event
           s->tx_busy_ = false;
           s->communicator::indication(res ? tx_done : tx_error);    // inform upper layer
+          }
           break;
 
         case WAIT_OBJECT_0 + ev_receive :
