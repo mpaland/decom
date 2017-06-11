@@ -27,7 +27,7 @@
 //
 ///////////////////////////////////////////////////////////////////////////////
 
-#include "com.h"
+#include "../com.h"
 
 // include the platform specific implementation
 #include IMPL_HEADER(com/com_usbhid.h)

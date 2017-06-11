@@ -35,9 +35,10 @@
 #ifndef _DECOM_PROT_DELAY_H_
 #define _DECOM_PROT_DELAY_H_
 
-#include "prot.h"
-
 #include <chrono>
+
+#include "../prot.h"
+
 
 /////////////////////////////////////////////////////////////////////
 

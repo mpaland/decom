@@ -33,7 +33,7 @@
 #ifndef _DECOM_DEV_ECHO_H_
 #define _DECOM_DEV_ECHO_H_
 
-#include "dev.h"
+#include "../dev.h"
 
 /////////////////////////////////////////////////////////////////////
 

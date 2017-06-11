@@ -33,7 +33,8 @@
 #ifndef _DECOM_DEV_SKELETON_H_
 #define _DECOM_DEV_SKELETON_H_
 
-#include "dev.h"
+#include "../dev.h"
+
 
 /////////////////////////////////////////////////////////////////////
 

@@ -33,9 +33,10 @@
 #ifndef _DECOM_PROT_DEBUG_H_
 #define _DECOM_PROT_DEBUG_H_
 
-#include "prot.h"
-
 #include <sstream>
+
+#include "../prot.h"
+
 
 /////////////////////////////////////////////////////////////////////
 

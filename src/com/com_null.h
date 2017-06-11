@@ -34,7 +34,7 @@
 #ifndef _DECOM_COM_NULL_H_
 #define _DECOM_COM_NULL_H_
 
-#include "com.h"
+#include "../com.h"
 
 /////////////////////////////////////////////////////////////////////
 

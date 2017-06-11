@@ -1,12 +1,10 @@
 #ifndef _DECOM_TEST_COM_INET_H_
 #define _DECOM_TEST_COM_INET_H_
 
-#include "decom_cfg.h"
+#include "../src/com/com_inet.h"
+#include "../src/dev/dev_generic.h"
+#include "../src/dev/dev_echo.h"
 #include "test.h"
-
-#include "com/com_inet.h"
-#include "dev/dev_generic.h"
-#include "dev/dev_echo.h"
 
 
 namespace decom {

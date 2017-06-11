@@ -36,9 +36,10 @@
 #ifndef _DECOM_DEV_GENERIC_H_
 #define _DECOM_DEV_GENERIC_H_
 
-#include "dev.h"
+#include <cstring>
 
-#include <string.h>
+#include "../dev.h"
+
 
 /////////////////////////////////////////////////////////////////////
 

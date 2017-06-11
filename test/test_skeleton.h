@@ -1,12 +1,11 @@
 #ifndef _DECOM_TEST_SKELETON_H_
 #define _DECOM_TEST_SKELETON_H_
 
-#include "decom_cfg.h"
-#include "test.h"
-
 //#include "...."   // include your test module here
 
 //#include "...."   // include further modules
+
+#include "test.h"
 
 
 namespace decom {

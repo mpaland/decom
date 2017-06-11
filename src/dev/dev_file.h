@@ -39,7 +39,7 @@
 #include <algorithm>
 #include <iterator>
 
-#include "dev.h"
+#include "../dev.h"
 
 /////////////////////////////////////////////////////////////////////
 

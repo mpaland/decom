@@ -36,7 +36,7 @@
 #include <queue>
 #include <thread>
 
-#include "com.h"
+#include "../com.h"
 
 /////////////////////////////////////////////////////////////////////
 

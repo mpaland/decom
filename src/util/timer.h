@@ -27,7 +27,7 @@
 //
 ///////////////////////////////////////////////////////////////////////////////
 
-#include "layer.h"
+#include "../layer.h"
 
 // include the platform specific implementation
 #include IMPL_HEADER(util/timer.h)

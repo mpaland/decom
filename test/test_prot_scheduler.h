@@ -1,13 +1,11 @@
 #ifndef _DECOM_TEST_SCHEDULER_H_
 #define _DECOM_TEST_SCHEDULER_H_
 
-#include "decom_cfg.h"
+#include "../src/prot/prot_scheduler.h"
+#include "../src/prot/prot_debug.h"
+#include "../src/com/com_null.h"
+#include "../src/dev/dev_generic.h"
 #include "test.h"
-
-#include "prot/prot_scheduler.h"
-#include "prot/prot_debug.h"
-#include "com/com_null.h"
-#include "dev/dev_generic.h"
 
 
 namespace decom {

@@ -35,7 +35,7 @@
 #ifndef _DECOM_COM_SKELETON_H_
 #define _DECOM_COM_SKELETON_H_
 
-#include "com.h"
+#include "../com.h"
 
 /////////////////////////////////////////////////////////////////////
 

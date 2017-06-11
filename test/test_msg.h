@@ -1,10 +1,8 @@
 #ifndef _DECOM_TEST_MSG_H_
 #define _DECOM_TEST_MSG_H_
 
-#include "decom_cfg.h"
-
+#include "../src/msg.h"
 #include "test.h"
-#include "msg.h"
 
 
 namespace decom {

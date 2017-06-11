@@ -32,7 +32,8 @@
 #ifndef _DECOM_PROT_DISTURB_H_
 #define _DECOM_PROT_DISTURB_H_
 
-#include "prot.h"
+#include "../prot.h"
+
 
 /////////////////////////////////////////////////////////////////////
 

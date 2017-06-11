@@ -1,6 +1,6 @@
 ///////////////////////////////////////////////////////////////////////////////
 // \author (c) Marco Paland (info@paland.com)
-//             2011-2015, PALANDesign Hannover, Germany
+//             2011-2017, PALANDesign Hannover, Germany
 //
 // \license The MIT License (MIT)
 //
@@ -63,7 +63,8 @@
 #ifndef _DECOM_PROT_INTEL_HEX_H_
 #define _DECOM_PROT_INTEL_HEX_H_
 
-#include "prot.h"
+#include "../prot.h"
+
 
 /////////////////////////////////////////////////////////////////////
 

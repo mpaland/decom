@@ -32,7 +32,8 @@
 #ifndef _DECOM_PROT_FRAME_H_
 #define _DECOM_PROT_FRAME_H_
 
-#include "prot.h"
+#include "../prot.h"
+
 
 /////////////////////////////////////////////////////////////////////
 

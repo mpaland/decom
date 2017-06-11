@@ -51,10 +51,11 @@
 #ifndef _DECOM_PROT_HUB_H_
 #define _DECOM_PROT_HUB_H_
 
-#include "prot.h"
-
 #include <vector>
 #include <mutex>
+
+#include "../prot.h"
+
 
 /////////////////////////////////////////////////////////////////////
 

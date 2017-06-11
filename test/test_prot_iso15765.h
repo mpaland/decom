@@ -1,15 +1,12 @@
 #ifndef _DECOM_TEST_ISO15765_H_
 #define _DECOM_TEST_ISO15765_H_
 
-#include "decom_cfg.h"
-
+#include "../src/prot/automotive/prot_iso15765.h"
+#include "../src/prot/prot_debug.h"
+#include "../src/com/com_generic.h"
+#include "../src/com/com_loopback.h"
+#include "../src/dev/dev_generic.h"
 #include "test.h"
-
-#include "prot/automotive/prot_iso15765.h"
-#include "prot/prot_debug.h"
-#include "com/com_generic.h"
-#include "com/com_loopback.h"
-#include "dev/dev_generic.h"
 
 
 namespace decom {

@@ -1,10 +1,10 @@
 #ifndef _DECOM_TEST_STL_CHRONO_H_
 #define _DECOM_TEST_STL_CHRONO_H_
 
-#include "decom_cfg.h"
 #include "test.h"
 
 // chrono should be included via decom_cfg
+
 
 namespace decom {
 namespace test {

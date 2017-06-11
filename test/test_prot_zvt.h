@@ -1,13 +1,10 @@
 #ifndef _DECOM_TEST_PROT_ZVT_H_
 #define _DECOM_TEST_PROT_ZVT_H_
 
-#include "decom_cfg.h"
-
+#include "../src/ext/ZVT/prot_zvt.h"
+#include "../src/com/com_generic.h"
+#include "../src/dev/dev_generic.h"
 #include "test.h"
-
-#include "ext/ZVT/prot_zvt.h"
-#include "com/com_generic.h"
-#include "dev/dev_generic.h"
 
 
 namespace decom {

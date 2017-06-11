@@ -54,7 +54,7 @@
 #define STRINGIFY(x) #x
 #define XSTRINGIFY(d) STRINGIFY(d)
 #define PATH(header, platform) XSTRINGIFY(platform ## header)
-#define IMPL(s) ./impl/s/
+#define IMPL(s) ./../impl/s/
 #define IMPL_HEADER(header) PATH(header, IMPL(PLATFORM))
 
 

@@ -55,7 +55,7 @@
 #ifndef _DECOM_DEV_BRIDGE_H_
 #define _DECOM_DEV_BRIDGE_H_
 
-#include "dev.h"
+#include "../dev.h"
 
 /////////////////////////////////////////////////////////////////////
 

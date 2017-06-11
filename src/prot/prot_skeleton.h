@@ -35,7 +35,8 @@
 #ifndef _DECOM_PROT_SKELETON_H_
 #define _DECOM_PROT_SKELETON_H_
 
-#include "prot.h"
+#include "../prot.h"
+
 
 /////////////////////////////////////////////////////////////////////
 
