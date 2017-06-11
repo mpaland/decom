@@ -43,7 +43,7 @@
 #include <vector>
 #include <sstream>
 
-#include "com.h"
+#include "../../../com.h"
 
 /////////////////////////////////////////////////////////////////////
 
