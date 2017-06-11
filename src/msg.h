@@ -49,7 +49,7 @@
 #include <cstdint>
 #include <mutex>
 #include <iterator>
-#include <string.h>   // for memcpy
+#include <cstring>    // for memcpy
 
 #include "decom_cfg.h"
 #include "log.h"
