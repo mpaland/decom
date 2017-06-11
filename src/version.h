@@ -36,8 +36,8 @@
 /**
  * decom version information
  */
-#define DECOM_VERSION         "0.6.1"   //  X.Y.Z
-#define DECOM_VERSION_NUMBER  0006001   // (X*1000000 + Y*1000 + Z)
+#define DECOM_VERSION         "0.6.2"   //  X.Y.Z
+#define DECOM_VERSION_NUMBER  0006002   // (X*1000000 + Y*1000 + Z)
 
 
 /**
