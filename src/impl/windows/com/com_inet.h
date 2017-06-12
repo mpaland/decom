@@ -75,7 +75,7 @@
 #include <Ws2tcpip.h>
 #include <string.h>
 
-#include "com.h"
+#include "../../../com.h"
 
 
 // defines the size of the receive buffer

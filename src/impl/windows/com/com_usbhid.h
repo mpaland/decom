@@ -49,7 +49,7 @@
 #include <atlconv.h>    // conversion macros
 #include <vector>
 
-#include "com.h"
+#include "../../../com.h"
 
 /////////////////////////////////////////////////////////////////////
 
