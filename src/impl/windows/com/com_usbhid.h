@@ -84,6 +84,11 @@ typedef struct _HIDP_CAPS {
 } HIDP_CAPS, *PHIDP_CAPS;
 typedef void* PHIDP_PREPARSED_DATA;
 
+#ifndef _NTDEF_
+typedef _Return_type_success_(return >= 0) LONG NTSTATUS;
+typedef NTSTATUS *PNTSTATUS;
+#endif
+
 #define HIDP_STATUS_SUCCESS 0x110000
 
 typedef BOOLEAN(__stdcall *HidD_GetHidGuid_)(LPGUID HidGuid);
