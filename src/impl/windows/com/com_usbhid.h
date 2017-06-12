@@ -667,7 +667,8 @@ private:
 
         case WAIT_OBJECT_0 + ev_transmit :
           // tx event
-          BOOL res = ::GetOverlappedResult(u->device_handle_, &u->tx_overlapped_, &bytes_written, FALSE) && bytes_written);
+          {
+            BOOL res = ::GetOverlappedResult(u->device_handle_, &u->tx_overlapped_, &bytes_written, FALSE) && bytes_written;
           (void)::ResetEvent(u->events_[ev_transmit]);    // manual reset event
           if (res) {
             // okay - byte written, any more data segments to send
@@ -690,6 +691,7 @@ private:
             // discard any outstanding send data
             u->tx_busy_ = false;
             u->communicator::indication(tx_error, u->tx_eid_);
+          }
           }
           break;
 
