@@ -32,7 +32,7 @@
 #include <windows.h>
 #include <stdio.h>
 
-#include "log.h"
+#include "../../log.h"
 
 
 // windows console colors

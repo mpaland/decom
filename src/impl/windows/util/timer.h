@@ -42,7 +42,7 @@
 #include <process.h>
 #include <chrono>
 
-#include "decom_cfg.h"
+#include "../../../decom_cfg.h"
 
 /////////////////////////////////////////////////////////////////////
 
