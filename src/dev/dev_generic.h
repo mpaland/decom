@@ -49,6 +49,8 @@ namespace dev {
 
 class generic : public device
 {
+  bool receive_last_more_;
+
 public:
   // device ctor
   generic(layer* lower, const char* name = "dev_generic")
@@ -58,6 +60,7 @@ public:
     , tx_status_(disconnected)
     , callback_(nullptr)
     , callback_arg_(nullptr)
+    , receive_last_more_(false)
   {
     tx_ev_.set();   // set event initially
   }
@@ -120,11 +123,9 @@ public:
       return;
     }
 
-    static bool last_more = false;
-
     // acquire buffer lock and append / replace received data
     std::lock_guard<std::mutex> lock(rx_mutex_);
-    if (last_more) {
+    if (receive_last_more_) {
       // more data expected - append data
       rx_msg_.append(data);
     }
@@ -132,7 +133,7 @@ public:
       // copy data (cheap copy)
       rx_msg_.ref_copy(data);
     }
-    last_more = more;
+    receive_last_more_ = more;
     if (!more) {
       if (callback_) {
         callback_(callback_arg_, rx_msg_, id);
