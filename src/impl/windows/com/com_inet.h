@@ -71,9 +71,9 @@
 #include <sstream>
 #include <thread>
 #include <mutex>
-
+#include <codecvt>
 #include <Ws2tcpip.h>
-#include <string.h>
+#include <cstring>
 
 #include "../../../com.h"
 
@@ -92,6 +92,37 @@ namespace com {
 
 class inet : public communicator
 {
+  std::vector<std::thread*> worker_threads_;    // pool of worker threads
+  std::thread* accept_thread_;                  // accept thread
+
+  bool        use_tcp_;             // use TCP or UDP
+  bool        use_ipv6_;            // use IPv4 or IPv6
+  bool        server_;              // server or client
+  SOCKET      socket_;              // socket
+  HANDLE      completion_port_;     // completion port
+  std::string source_addr_;         // source addr
+
+  typedef struct tag_io_data_type {
+    OVERLAPPED        ov;
+    WSABUF            wsa_buffer;
+    char              buffer[COM_INET_RX_BUFFER_SIZE];
+    SOCKADDR_STORAGE  from_addr;
+    int               from_len;
+    bool              send;
+  } io_data_type;
+
+  typedef struct tag_client_context_type {
+    io_data_type recv;
+    io_data_type send;
+    SOCKET       socket;    // associated accept socket
+    eid          id;        // eid of the socket, here: address = IP, port = port
+  } client_context_type;
+
+  typedef std::map<eid, client_context_type*> client_contexts_type;
+
+  client_contexts_type client_contexts_;
+  std::mutex           client_contexts_mutex_;
+
 public:
   /**
    * Normal ctor
@@ -121,8 +152,8 @@ public:
     }
 
     // create I/O completion port
-    completion_port_ = ::CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 0);
-    if (completion_port_ == NULL) {
+    completion_port_ = ::CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, 0);
+    if (!completion_port_) {
       // error creation completion port - abort
       DECOM_LOG_EMERG("Creating completion port failed");
       return;
@@ -133,7 +164,7 @@ public:
       SYSTEM_INFO system_info;
       ::GetSystemInfo(&system_info);    // determine how many processors are on the system
       DECOM_LOG_INFO("Detected " << (int)system_info.dwNumberOfProcessors << " cores, creating " << (int)system_info.dwNumberOfProcessors * COM_INET_THREADS_PER_PROCESSOR << " worker threads");
-      for (DWORD i = 0; i < system_info.dwNumberOfProcessors * COM_INET_THREADS_PER_PROCESSOR; i++) {
+      for (DWORD i = 0U; i < system_info.dwNumberOfProcessors * COM_INET_THREADS_PER_PROCESSOR; i++) {
         worker_threads_.push_back(new std::thread(&inet::worker_thread, this));
         //DECOM_LOG_DEBUG("Created worker thread ") << ss.str();
       }
@@ -213,7 +244,7 @@ public:
       // S E R V E R
 
       // bind socket
-      if (::bind(socket_, result->ai_addr, result->ai_addrlen)) {
+      if (::bind(socket_, result->ai_addr, result->ai_addrlen) == SOCKET_ERROR) {
         DECOM_LOG_ERROR("Socket bind() failed with error " << ::WSAGetLastError());
         return false;
       }
@@ -235,11 +266,11 @@ public:
         // UDP SERVER
 
         client_context_type* client_context = new client_context_type;
-        memset(&client_context->recv.overlapped, 0, sizeof(client_context->recv.overlapped));
+        memset(&client_context->recv.ov, 0, sizeof(client_context->recv.ov));
         client_context->recv.wsa_buffer.buf = client_context->recv.buffer;
         client_context->recv.wsa_buffer.len = sizeof(client_context->recv.buffer);
         client_context->recv.send = false;
-        memset(&client_context->send.overlapped, 0, sizeof(client_context->send.overlapped));
+        memset(&client_context->send.ov, 0, sizeof(client_context->send.ov));
         client_context->send.wsa_buffer.buf = client_context->send.buffer;
         client_context->send.wsa_buffer.len = 0;
         client_context->send.send = true;
@@ -257,10 +288,9 @@ public:
         }
 
         // trigger initial receive
-        DWORD flags = 0;
-        DWORD recv_bytes = 0;
+        DWORD flags = 0U;
         client_context->recv.from_len = sizeof(client_context->recv.from_addr);
-        if (::WSARecvFrom(socket_, &client_context->recv.wsa_buffer, 1U, &recv_bytes, &flags, (SOCKADDR*)&client_context->recv.from_addr, &client_context->recv.from_len, &client_context->recv.overlapped, NULL) == SOCKET_ERROR) {
+        if (::WSARecvFrom(socket_, &client_context->recv.wsa_buffer, 1U, NULL, &flags, (SOCKADDR*)&client_context->recv.from_addr, &client_context->recv.from_len, &client_context->recv.ov, nullptr) == SOCKET_ERROR) {
           if (::WSAGetLastError() != WSA_IO_PENDING) {
             DECOM_LOG_ERROR("Initial receive failed");
           }
@@ -276,7 +306,7 @@ public:
         PADDRINFOA addr_src = resolve_address(source_addr_.c_str());
         if (addr_src) {
           // bind socket
-          if (::bind(socket_, addr_src->ai_addr, addr_src->ai_addrlen)) {
+          if (::bind(socket_, addr_src->ai_addr, addr_src->ai_addrlen) == SOCKET_ERROR) {
             DECOM_LOG_WARN("Source bind() failed with error " << ::WSAGetLastError());
           }
         }
@@ -293,11 +323,11 @@ public:
 
       // register context
       client_context_type* client_context = new client_context_type;
-      memset(&client_context->recv.overlapped, 0, sizeof(client_context->recv.overlapped));
+      memset(&client_context->recv.ov, 0, sizeof(client_context->recv.ov));
       client_context->recv.wsa_buffer.buf = client_context->recv.buffer;
       client_context->recv.wsa_buffer.len = sizeof(client_context->recv.buffer);
       client_context->recv.send = false;
-      memset(&client_context->send.overlapped, 0, sizeof(client_context->send.overlapped));
+      memset(&client_context->send.ov, 0, sizeof(client_context->send.ov));
       client_context->send.wsa_buffer.buf = client_context->send.buffer;
       client_context->send.wsa_buffer.len = 0;
       client_context->send.send = true;
@@ -322,9 +352,8 @@ public:
       communicator::indication(connected, eid_any);
 
       // trigger initial receive
-      DWORD flags = 0;
-      DWORD recv_bytes = 0;
-      if (::WSARecv(socket_, &client_context->recv.wsa_buffer, 1U, &recv_bytes, &flags, &(client_context->recv.overlapped), NULL) == SOCKET_ERROR) {
+      DWORD flags = 0U;
+      if (::WSARecv(socket_, &client_context->recv.wsa_buffer, 1U, NULL, &flags, &(client_context->recv.ov), nullptr) == SOCKET_ERROR) {
         if (::WSAGetLastError() != WSA_IO_PENDING) {
           DECOM_LOG_ERROR("Initial receive failed");
         }
@@ -355,13 +384,11 @@ public:
     socket_ = INVALID_SOCKET;
 
     // delete all client sockets and contexts
-    if (server_) {
-      for (client_contexts_type::const_iterator it = client_contexts_.begin(); it != client_contexts_.end(); ++it) {
-        // notify upper layer
-        (void)::shutdown(it->second->socket, SD_BOTH);
-        (void)::closesocket(it->second->socket);
-        // closed indication in worker thread
-      }
+    for (const auto& cc : client_contexts_) {
+      // notify upper layer
+      (void)::shutdown(cc.second->socket, SD_BOTH);
+      (void)::closesocket(cc.second->socket);
+      // closed indication in worker thread
     }
 
     // wait for accept thread termination
@@ -410,7 +437,6 @@ public:
     data.get((std::uint8_t*)context->second->send.wsa_buffer.buf, COM_INET_RX_BUFFER_SIZE);
     context->second->send.wsa_buffer.len = data.size();
 
-    DWORD send_bytes = 0U;
     int err;
     if (!use_tcp_ && server_) {
       // UDP server
@@ -425,11 +451,11 @@ public:
         ((SOCKADDR_IN*)&addr)->sin_port = ::htons(static_cast<std::uint16_t>(id.port()));
         memcpy(&((SOCKADDR_IN*)&addr)->sin_addr, &id.addr(), 4U);
       }
-      err = ::WSASendTo(context->second->socket, &context->second->send.wsa_buffer, 1U, &send_bytes, 0U, (SOCKADDR*)&addr, sizeof(SOCKADDR_STORAGE), &context->second->send.overlapped, NULL);
+      err = ::WSASendTo(context->second->socket, &context->second->send.wsa_buffer, 1U, NULL, 0U, (SOCKADDR*)&addr, sizeof(SOCKADDR_STORAGE), &context->second->send.ov, nullptr);
     }
     else {
       // TCP server or client
-      err = ::WSASend(context->second->socket, &context->second->send.wsa_buffer, 1U, &send_bytes, 0U, &context->second->send.overlapped, NULL);
+      err = ::WSASend(context->second->socket, &context->second->send.wsa_buffer, 1U, NULL, 0U, &context->second->send.ov, nullptr);
     }
     if (err == SOCKET_ERROR && ::WSAGetLastError() != WSA_IO_PENDING) {
       DECOM_LOG_ERROR("Sending failure, eid ") << format_eid(id).str().c_str();
@@ -450,7 +476,7 @@ public:
    * Set this BEFORE calling open()!
    * \param address The source address in the form of "host:port", "IP:port" (IPv4) or "[IP]:port" (IPv6)
    */
-  void set_source_address(const char* address = "")
+  void set_source_address(const std::string& address)
   {
     // already open?
     if (socket_ != INVALID_SOCKET) {
@@ -490,11 +516,11 @@ public:
 
       // register client context
       client_context_type* client_context = new client_context_type;
-      memset(&client_context->recv.overlapped, 0, sizeof(client_context->recv.overlapped));
+      memset(&client_context->recv.ov, 0, sizeof(client_context->recv.ov));
       client_context->recv.wsa_buffer.buf = client_context->recv.buffer;
       client_context->recv.wsa_buffer.len = sizeof(client_context->recv.buffer);
       client_context->recv.send = false;
-      memset(&client_context->send.overlapped, 0, sizeof(client_context->send.overlapped));
+      memset(&client_context->send.ov, 0, sizeof(client_context->send.ov));
       client_context->send.wsa_buffer.buf = client_context->send.buffer;
       client_context->send.wsa_buffer.len = 0;
       client_context->send.send = true;
@@ -518,9 +544,8 @@ public:
       i->communicator::indication(connected, client_context->id);
 
       // trigger initial receive
-      DWORD flags = 0;
-      DWORD recv_bytes = 0;
-      if (::WSARecv(accept_socket, &client_context->recv.wsa_buffer, 1U, &recv_bytes, &flags, &(client_context->recv.overlapped), NULL) == SOCKET_ERROR) {
+      DWORD flags = 0U;
+      if (::WSARecv(accept_socket, &client_context->recv.wsa_buffer, 1U, NULL, &flags, &(client_context->recv.ov), nullptr) == SOCKET_ERROR) {
         if (::WSAGetLastError() != WSA_IO_PENDING) {
           DECOM_LOG_ERROR2("Initial receive failed", i->name_);
         }
@@ -537,7 +562,7 @@ public:
 
     for (;;) {
       DWORD bytes_transferred = 0U;
-      OVERLAPPED* overlapped;
+      LPOVERLAPPED overlapped = nullptr;
       client_context_type* client_context;
 
       // actual context is given as completion key
@@ -563,14 +588,14 @@ public:
         }
 
         if (overlapped) {
-          io_data_type* io_data = CONTAINING_RECORD(overlapped, io_data_type, overlapped);
+          io_data_type* io_data = CONTAINING_RECORD(overlapped, io_data_type, ov);
           if (io_data->send) {
             // sending bytes
             if (bytes_transferred != io_data->wsa_buffer.len) {
               // sending not completed
               client_context->send.wsa_buffer.buf += bytes_transferred;
               client_context->send.wsa_buffer.len -= bytes_transferred;
-              if (::WSASend(client_context->socket, &client_context->send.wsa_buffer, 1U, &bytes_transferred, 0U, &client_context->send.overlapped, NULL) == SOCKET_ERROR) {
+              if (::WSASend(client_context->socket, &client_context->send.wsa_buffer, 1U, &bytes_transferred, 0U, &client_context->send.ov, NULL) == SOCKET_ERROR) {
                 if (::WSAGetLastError() != WSA_IO_PENDING) {
                   DECOM_LOG_ERROR2("Sending failure", i->name_);
                   // tx error indication
@@ -593,12 +618,25 @@ public:
             i->communicator::receive(data, (!i->use_tcp_ && i->server_) ? id : client_context->id);  // use received address as eid if UDP server
             // continue receiving
             DWORD flags = 0U;
-            client_context->recv.from_len = sizeof(client_context->recv.from_addr);
-            if (::WSARecvFrom(client_context->socket, &client_context->recv.wsa_buffer, 1U, &bytes_transferred, &flags, (SOCKADDR*)&client_context->recv.from_addr, &client_context->recv.from_len, &client_context->recv.overlapped, NULL) == SOCKET_ERROR) {
-              if (::WSAGetLastError() != WSA_IO_PENDING) {
-                DECOM_LOG_ERROR2("Receive failed", i->name_);
-                // rx error indication
-                i->communicator::indication(rx_error, (!i->use_tcp_ && i->server_) ? id : client_context->id);
+            if (!i->use_tcp_ && i->server_) {
+              // UDP server
+              client_context->recv.from_len = sizeof(client_context->recv.from_addr);
+              if (::WSARecvFrom(client_context->socket, &client_context->recv.wsa_buffer, 1U, NULL, &flags, (SOCKADDR*)&client_context->recv.from_addr, &client_context->recv.from_len, &client_context->recv.ov, NULL) == SOCKET_ERROR) {
+                if (::WSAGetLastError() != WSA_IO_PENDING) {
+                  DECOM_LOG_ERROR2("Receive failed", i->name_);
+                  // rx error indication
+                  i->communicator::indication(rx_error, (!i->use_tcp_ && i->server_) ? id : client_context->id);
+                }
+              }
+            }
+            else {
+              // client
+              if (::WSARecv(client_context->socket, &client_context->recv.wsa_buffer, 1U, NULL, &flags, &(client_context->recv.ov), nullptr) == SOCKET_ERROR) {
+                if (::WSAGetLastError() != WSA_IO_PENDING) {
+                  DECOM_LOG_ERROR2("Receive failed", i->name_);
+                  // rx error indication
+                  i->communicator::indication(rx_error, (!i->use_tcp_ && i->server_) ? id : client_context->id);
+                }
               }
             }
           }
@@ -612,6 +650,7 @@ public:
         //remove/delete client_context
         std::lock_guard<std::mutex> lock(i->client_contexts_mutex_);
         i->client_contexts_.erase(client_context->id.port());
+        delete(client_context);
       }
     }
 
@@ -642,15 +681,15 @@ private:
 
   std::stringstream address_to_string(SOCKADDR_STORAGE* addr) const
   {
-    char ip[128];
+    TCHAR ip[128];
     DWORD ip_len = sizeof(ip);
-    (void)::WSAAddressToStringA((SOCKADDR*)addr, sizeof(SOCKADDR_STORAGE), NULL, ip, &ip_len);
-    std::stringstream str(ip);
+    (void)::WSAAddressToString((SOCKADDR*)addr, sizeof(SOCKADDR_STORAGE), NULL, ip, &ip_len);
+    std::stringstream str(std::wstring_convert<std::codecvt_utf8_utf16<TCHAR>, TCHAR>{}.to_bytes(ip));
     return str;
   }
 
 
-  PADDRINFOA inet::resolve_address(const char* address) const
+  PADDRINFOA resolve_address(const char* address) const
   {
     // extract host and port from address
     std::string host(address);
@@ -694,43 +733,10 @@ private:
       DECOM_LOG_ERROR("Address " << address << " can't be resolved, getaddrinfo() failed with error " << ::WSAGetLastError());
       return nullptr;
     }
-    DECOM_LOG_INFO("Address resolved to ") << address_to_string((SOCKADDR_STORAGE*)result->ai_addr).str().c_str();
+    DECOM_LOG_INFO("'" << address << "' resolved to ") << address_to_string((SOCKADDR_STORAGE*)result->ai_addr).str().c_str();
 
     return result;
   }
-
-
-private:
-  std::vector<std::thread*> worker_threads_;    // pool of worker threads
-  std::thread* accept_thread_;                  // accept thread
-
-  bool        use_tcp_;             // use TCP or UDP
-  bool        use_ipv6_;            // use IPv4 or IPv6
-  bool        server_;              // server or client
-  SOCKET      socket_;              // socket
-  HANDLE      completion_port_;     // completion port
-  std::string source_addr_;         // source addr
-
-  typedef struct tag_io_data_type {
-    OVERLAPPED        overlapped;
-    WSABUF            wsa_buffer;
-    char              buffer[COM_INET_RX_BUFFER_SIZE];
-    SOCKADDR_STORAGE  from_addr;
-    int               from_len;
-    bool              send;
-  } io_data_type;
-
-  typedef struct tag_client_context_type {
-    io_data_type recv;
-    io_data_type send;
-    SOCKET       socket;    // associated accept socket
-    eid          id;        // eid of the socket, here: address = IP, port = port
-  } client_context_type;
-
-  typedef std::map<eid, client_context_type*> client_contexts_type;
-
-  client_contexts_type client_contexts_;
-  std::mutex           client_contexts_mutex_;
 };
 
 } // namespace com
