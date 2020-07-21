@@ -37,6 +37,7 @@
 #define _DECOM_DEV_GENERIC_H_
 
 #include <cstring>
+#include <functional>
 
 #include "../dev.h"
 
@@ -49,7 +50,25 @@ namespace dev {
 
 class generic : public device
 {
-  bool receive_last_more_;
+public:
+  typedef std::function<void(void* arg, msg& data, eid const& id)> callback_type;
+
+protected:
+  bool          is_open_;       // true if device is open
+  bool          is_connected_;  // true if device is connected
+  eid           eid_;           // opened eid
+
+  msg           rx_msg_;        // receive buffer
+  eid           rx_eid_;        // receive eid
+  bool          rx_more_;       // last more flag
+  std::mutex    rx_mutex_;      // receive buffer mutex
+  util::event   rx_ev_;         // receive event
+  util::event   tx_ev_;         // transmit event
+  util::event   con_ev_;        // connection event
+  status_type   tx_status_;     // actual tx status
+
+  callback_type callback_;      // receive callback function
+  void*         callback_arg_;  // callback arg
 
 public:
   // device ctor
@@ -58,9 +77,9 @@ public:
     , is_open_(false)
     , is_connected_(false)
     , tx_status_(disconnected)
+    , rx_more_(false)
     , callback_(nullptr)
     , callback_arg_(nullptr)
-    , receive_last_more_(false)
   {
     tx_ev_.set();   // set event initially
   }
@@ -125,7 +144,7 @@ public:
 
     // acquire buffer lock and append / replace received data
     std::lock_guard<std::mutex> lock(rx_mutex_);
-    if (receive_last_more_) {
+    if (rx_more_) {
       // more data expected - append data
       rx_msg_.append(data);
     }
@@ -133,7 +152,7 @@ public:
       // copy data (cheap copy)
       rx_msg_.ref_copy(data);
     }
-    receive_last_more_ = more;
+    rx_more_ = more;
     if (!more) {
       if (callback_) {
         callback_(callback_arg_, rx_msg_, id);
@@ -340,29 +359,11 @@ public:
    * This can be used as notification function or e.g. for message injection
    * \param rx_callback Callback function
    */
-  void set_receive_callback(void* arg, void(*callback)(void* arg, msg& data, eid const& id))
+  void set_receive_callback(void* arg, callback_type callback)
   {
     callback_     = callback;
     callback_arg_ = arg;
   }
-
-
-protected:
-  bool          is_open_;       // true if device is open
-  bool          is_connected_;  // true if device is connected
-  eid           eid_;           // opened eid
-
-  msg           rx_msg_;        // receive buffer
-  eid           rx_eid_;        // receive eid
-  bool          rx_more_;       // last more flag
-  std::mutex    rx_mutex_;      // receive buffer mutex
-  util::event   rx_ev_;         // receive event
-  util::event   tx_ev_;         // transmit event
-  util::event   con_ev_;        // connection event
-  status_type   tx_status_;     // actual tx status
-
-  void (*callback_)(void* arg, msg& data, eid const& id);   // receive callback function
-  void*         callback_arg_;  // callback arg
 };
 
 } // namespace dev
