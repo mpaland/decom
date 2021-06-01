@@ -1,6 +1,6 @@
 ///////////////////////////////////////////////////////////////////////////////
 // \author (c) Marco Paland (info@paland.com)
-//             2011-2017, PALANDesign Hannover, Germany
+//             2011-2021, PALANDesign Hannover, Germany
 //
 // \license The MIT License (MIT)
 //
@@ -74,6 +74,9 @@ struct eid
     std::uint64_t addr64[2];
   };
 
+  addr_type     addr_;
+  std::uint32_t port_;
+
 
   // ctor
   eid()
@@ -91,6 +94,13 @@ struct eid
   }
 
 
+  // address port ctor
+  eid(const addr_type& addr, std::uint32_t port)
+    : addr_(addr)
+    , port_(port)
+  { }
+
+
   // addr access
   inline addr_type const& addr() const { return addr_; }
   inline addr_type& addr() { return addr_; }
@@ -98,7 +108,7 @@ struct eid
 
   // port access
   inline std::uint32_t port() const { return port_; }
-  inline void port(std::uint32_t val) { port_ = val; }
+  inline std::uint32_t& port() { return port_; }
 
 
   // is_any test
@@ -118,9 +128,9 @@ struct eid
   // comparisons
   inline bool operator==(eid const& other) const
   {
-    return (port_ == other.port())                &&
-      (addr_.addr64[0] == other.addr().addr64[0]) &&
-      (addr_.addr64[1] == other.addr().addr64[1]);
+    return (port_           == other.port())           &&
+           (addr_.addr64[0] == other.addr().addr64[0]) &&
+           (addr_.addr64[1] == other.addr().addr64[1]);
   }
 
 
@@ -130,16 +140,24 @@ struct eid
 
   inline bool operator<(eid const& other) const
   {
-    return (port_ < other.port())                 &&
-      ((addr_.addr64[1] < other.addr().addr64[1]) ||
-       (addr_.addr64[1] == other.addr().addr64[1] && addr_.addr64[0] < other.addr().addr64[0])
-      );
+    if (addr_.addr64[1] < other.addr().addr64[1]) {
+      return true;
+    }
+    else if (addr_.addr64[1] > other.addr().addr64[1]) {
+      return false;
+    }
+    else {
+      if (addr_.addr64[0] < other.addr().addr64[0]) {
+        return true;
+      }
+      else if (addr_.addr64[0] > other.addr().addr64[0]) {
+        return false;
+      }
+      else {
+        return port_ < other.port();
+      }
+    }
   }
-
-
-private:
-  addr_type     addr_;
-  std::uint32_t port_;
 };
 
 
@@ -154,8 +172,12 @@ static const eid eid_any;
 class layer
 {
 protected:
+  layer* lower_;   // pointer to lower layer
+  layer* upper_;   // pointer to upper layer
+
+protected:
   /**
-   * no default ctor
+   * No default ctor
    */
   layer()
   { }
@@ -169,6 +191,27 @@ public:
 
 
   /**
+   * Maximum transmision unit
+   * The maximum packet / message size that the layer can handle, 0U for no limit
+   */
+  std::uint32_t mtu_;
+
+
+  // Status indication codes from lower to upper layer
+  typedef enum tag_status_type {
+    connected,      // connection established, layer can be used for communication now
+    disconnected,   // interface, line, post etc. gone or connection ended
+    tx_done,        // data completely transmitted, next data is acceptable by lower layer
+    tx_error,       // unrecoverable transmission error, transmission is aborted
+    tx_timeout,     // timeout error, upper layer may resend last data
+    tx_overrun,     // transmitter overrun error - should not happen, upper layer (application) must take care
+    rx_error,       // receive error
+    rx_timeout,     // timeout error
+    rx_overrun      // receiver overrun error
+  } status_type;
+
+
+  /**
    * Communicator base class ctor - only called by communicator derived classes,
    * cause they don't have a lower layer
    */
@@ -176,6 +219,7 @@ public:
     : lower_(nullptr)
     , upper_(nullptr)
     , name_(name)
+    , mtu_(0U)
   {
     // clear/init statistics
     stats_clear();
@@ -193,6 +237,7 @@ public:
     : lower_(lower)
     , upper_(lower->upper_)
     , name_(name)
+    , mtu_(0U)
   {
     // insert this layer between lower and upper layer
     if (lower->upper_) {
@@ -275,22 +320,10 @@ public:
   virtual void receive(msg& data, eid const& id = eid_any, bool more = false)
   {
     stats_in(data);
-    upper_->receive(data, id, more);
+    if (upper_) {
+      upper_->receive(data, id, more);
+    }
   }
-
-
-  // Status indication codes from lower to upper layer
-  typedef enum tag_status_type {
-    connected,      // connection established, layer can be used for communication now
-    disconnected,   // interface, line, post etc. gone or connection ended
-    tx_done,        // data completely transmitted, next data is acceptable by lower layer
-    tx_error,       // unrecoverable transmission error, transmission is aborted
-    tx_timeout,     // timeout error, upper layer may resend last data
-    tx_overrun,     // transmitter overrun error - should not happen, upper layer (application) must take care
-    rx_error,       // receive error
-    rx_timeout,     // timeout error
-    rx_overrun      // receiver overrun error
-  } status_type;
 
 
   /**
@@ -299,7 +332,11 @@ public:
    * \param id The endpoint identifier
    */
   virtual void indication(status_type code, eid const& id = eid_any)
-  { if (upper_) upper_->indication(code, id); }
+  {
+    if (upper_) {
+      upper_->indication(code, id);
+    }
+  }
 
 
   /**
@@ -310,12 +347,20 @@ public:
   { }
 
 
-protected:
-  layer* lower_;   // pointer to lower layer
-  layer* upper_;   // pointer to upper layer
+  /**
+   * MTU access
+   * \return Reference to MTU
+   */
+  std::uint32_t& mtu()
+  {
+    return mtu_;
+  }
 
 
-  // layer statistics
+  /**
+   * Layer statistics
+   * Define DECOM_STATS to enable the statistic
+   */
 #ifdef DECOM_STATS
 public:
   typedef struct tag_statistic_type {
