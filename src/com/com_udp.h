@@ -1,6 +1,6 @@
 ///////////////////////////////////////////////////////////////////////////////
 // \author (c) Marco Paland (info@paland.com)
-//             2011-2017, PALANDesign Hannover, Germany
+//             2011-2021, PALANDesign Hannover, Germany
 //
 // \license The MIT License (MIT)
 //
@@ -23,11 +23,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 //
-// \brief Internet (TCP/UDP/IP) communication class
+// \brief Internet UDP communication class
 //
 ///////////////////////////////////////////////////////////////////////////////
 
 #include "../com.h"
 
 // include the platform specific implementation
-#include IMPL_HEADER(com/com_inet.h)
+#include IMPL_HEADER(com/com_udp.h)
