@@ -52,8 +52,8 @@ public:
    * \param lower Lower layer
    * \param name The name which will be logged as layer name, if empty, "debug" is default
    */
-  debug(layer* lower, const char* name = "")
-    : protocol(lower, *name ? name : "debug")
+  debug(layer* lower, const char* name = "debug")
+    : protocol(lower, name)
   { }
 
 

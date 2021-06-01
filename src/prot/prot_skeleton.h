@@ -1,6 +1,6 @@
 ///////////////////////////////////////////////////////////////////////////////
 // \author (c) Marco Paland (info@paland.com)
-//             2011-2017, PALANDesign Hannover, Germany
+//             2011-2021, PALANDesign Hannover, Germany
 //
 // \license The MIT License (MIT)
 //
@@ -29,7 +29,7 @@
 // implementations.
 // Any empty/unused function needn't be implemented, the base class
 // function is used instead
-///
+//
 ///////////////////////////////////////////////////////////////////////////////
 
 #ifndef _DECOM_PROT_SKELETON_H_
@@ -56,6 +56,9 @@ public:
     : protocol(lower, name)    // it's VERY IMPORTANT to call the base class ctor HERE!!!
   {
     // initialize your stuff here
+
+    // Set the MTU of this layer, 0 for no limit
+    mtu() = 0U;
   }
 
 
