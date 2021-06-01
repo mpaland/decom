@@ -1,6 +1,6 @@
 ///////////////////////////////////////////////////////////////////////////////
 // \author (c) Marco Paland (info@paland.com)
-//             2011-2017, PALANDesign Hannover, Germany
+//             2011-2021, PALANDesign Hannover, Germany
 //
 // \license The MIT License (MIT)
 //
@@ -37,7 +37,6 @@
 #define _DECOM_DEV_GENERIC_H_
 
 #include <cstring>
-#include <functional>
 
 #include "../dev.h"
 
@@ -50,8 +49,7 @@ namespace dev {
 
 class generic : public device
 {
-public:
-  typedef std::function<void(void* arg, msg& data, eid const& id)> callback_type;
+  bool receive_last_more_;
 
 protected:
   bool          is_open_;       // true if device is open
@@ -67,8 +65,9 @@ protected:
   util::event   con_ev_;        // connection event
   status_type   tx_status_;     // actual tx status
 
-  callback_type callback_;      // receive callback function
+  void (*callback_)(void* arg, msg& data, eid const& id);   // receive callback function
   void*         callback_arg_;  // callback arg
+
 
 public:
   // device ctor
@@ -77,9 +76,9 @@ public:
     , is_open_(false)
     , is_connected_(false)
     , tx_status_(disconnected)
-    , rx_more_(false)
     , callback_(nullptr)
     , callback_arg_(nullptr)
+    , receive_last_more_(false)
   {
     tx_ev_.set();   // set event initially
   }
@@ -144,7 +143,7 @@ public:
 
     // acquire buffer lock and append / replace received data
     std::lock_guard<std::mutex> lock(rx_mutex_);
-    if (rx_more_) {
+    if (receive_last_more_) {
       // more data expected - append data
       rx_msg_.append(data);
     }
@@ -152,7 +151,7 @@ public:
       // copy data (cheap copy)
       rx_msg_.ref_copy(data);
     }
-    rx_more_ = more;
+    receive_last_more_ = more;
     if (!more) {
       if (callback_) {
         callback_(callback_arg_, rx_msg_, id);
@@ -359,7 +358,7 @@ public:
    * This can be used as notification function or e.g. for message injection
    * \param rx_callback Callback function
    */
-  void set_receive_callback(void* arg, callback_type callback)
+  void set_receive_callback(void* arg, void(*callback)(void* arg, msg& data, eid const& id))
   {
     callback_     = callback;
     callback_arg_ = arg;
